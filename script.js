@@ -6,6 +6,7 @@ import {
     createUserWithEmailAndPassword,
     signInWithEmailAndPassword,
     signOut,
+    deleteUser,
     onAuthStateChanged
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 import {
@@ -96,15 +97,23 @@ async function handleSignup() {
         return;
     }
 
-    // Agent path — must match a roster entry a supervisor already uploaded
+    // Agent path — account is created first (Firestore rules require being
+    // signed in to read the roster), then rolled back if there's no match.
+    let cred;
+    try {
+        cred = await createUserWithEmailAndPassword(auth, email, pw);
+    } catch (err) {
+        return showAuthMsg('signupMsg', friendlyAuthError(err), false);
+    }
+
     try {
         const rosterSnap = await getDoc(doc(db, 'roster', email));
         if (!rosterSnap.exists()) {
+            await deleteUser(cred.user);
             return showAuthMsg('signupMsg', 'This email was not found on the agent roster. Ask your supervisor to add you, then try again.', false);
         }
         const match = rosterSnap.data();
 
-        const cred = await createUserWithEmailAndPassword(auth, email, pw);
         await setDoc(doc(db, 'users', cred.user.uid), {
             email,
             role: 'agent',
@@ -115,6 +124,8 @@ async function handleSignup() {
         await signOut(auth);
         setTimeout(() => switchAuthTab('login'), 900);
     } catch (err) {
+        // best-effort cleanup so a failed signup doesn't leave an orphaned auth account
+        try { await deleteUser(cred.user); } catch (e2) {}
         showAuthMsg('signupMsg', friendlyAuthError(err), false);
     }
 }
