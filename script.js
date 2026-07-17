@@ -41,6 +41,35 @@ async function clearCollection(collectionName) {
     }
 }
 
+/* Replaces the entire auditData collection using predictable IDs (row_0,
+   row_1, ...) tracked via a small metadata doc. This skips reading every
+   existing document just to find its ID before deleting it — cutting
+   Firestore operations per upload by roughly a third compared to
+   clearCollection() + batchWriteDocs(). The delete+write cost still scales
+   with row count (that's inherent to a full replace), so avoid uploading
+   repeatedly while testing — try a small trimmed sample file first. */
+async function replaceAuditData(rows) {
+    const metaRef = doc(db, 'meta', 'auditData');
+    const metaSnap = await getDoc(metaRef);
+    const prevCount = metaSnap.exists() ? (metaSnap.data().count || 0) : 0;
+
+    for (let i = 0; i < prevCount; i += 400) {
+        const end = Math.min(i + 400, prevCount);
+        const batch = writeBatch(db);
+        for (let j = i; j < end; j++) batch.delete(doc(db, 'auditData', 'row_' + j));
+        await batch.commit();
+    }
+
+    for (let i = 0; i < rows.length; i += 400) {
+        const chunk = rows.slice(i, i + 400);
+        const batch = writeBatch(db);
+        chunk.forEach((row, idx) => batch.set(doc(db, 'auditData', 'row_' + (i + idx)), row));
+        await batch.commit();
+    }
+
+    await setDoc(metaRef, { count: rows.length, updatedAt: Date.now() });
+}
+
 /* ==========================================================================
    SESSION
    Firebase Auth persists the session in the browser by default, so a page
@@ -72,6 +101,15 @@ function showAuthMsg(elId, text, ok) {
     el.className = 'auth-msg ' + (ok ? 'ok' : 'error');
 }
 
+/* Guards the auto-firing onAuthStateChanged listener from reacting while
+   handleSignup is mid-flight. Creating an account signs the user in
+   immediately, which used to fire the listener WHILE handleSignup was still
+   checking the roster and writing the profile doc — a race that caused the
+   success message to disappear, or the new agent to get logged straight
+   into a half-set-up session. Login temporarily sets this too, so it can
+   drive enterApp() itself deterministically instead of racing the listener. */
+let authFlowInProgress = false;
+
 async function handleSignup() {
     const email = document.getElementById('signupEmail').value.trim().toLowerCase();
     const pw = document.getElementById('signupPassword').value;
@@ -81,53 +119,69 @@ async function handleSignup() {
     if (pw.length < 6) return showAuthMsg('signupMsg', 'Password must be at least 6 characters.', false);
     if (pw !== pw2) return showAuthMsg('signupMsg', 'Passwords do not match.', false);
 
-    if (signupRole === 'supervisor') {
-        const code = document.getElementById('supervisorCode').value.trim();
-        if (code !== SUPERVISOR_INVITE_CODE) return showAuthMsg('signupMsg', 'Invalid supervisor invite code.', false);
+    authFlowInProgress = true;
+    try {
+        if (signupRole === 'supervisor') {
+            const code = document.getElementById('supervisorCode').value.trim();
+            if (code !== SUPERVISOR_INVITE_CODE) return showAuthMsg('signupMsg', 'Invalid supervisor invite code.', false);
+
+            let cred;
+            try {
+                cred = await createUserWithEmailAndPassword(auth, email, pw);
+            } catch (err) {
+                return showAuthMsg('signupMsg', friendlyAuthError(err), false);
+            }
+            await setDoc(doc(db, 'users', cred.user.uid), { email, role: 'supervisor' });
+            await signOut(auth);
+            showAuthMsg('signupMsg', 'Supervisor account created. You can log in now.', true);
+            clearSignupForm();
+            setTimeout(() => switchAuthTab('login'), 1200);
+            return;
+        }
+
+        // Agent path — account is created first (Firestore rules require being
+        // signed in to read the roster), then rolled back if there's no match.
+        let cred;
+        try {
+            cred = await createUserWithEmailAndPassword(auth, email, pw);
+        } catch (err) {
+            return showAuthMsg('signupMsg', friendlyAuthError(err), false);
+        }
 
         try {
-            const cred = await createUserWithEmailAndPassword(auth, email, pw);
-            await setDoc(doc(db, 'users', cred.user.uid), { email, role: 'supervisor' });
-            showAuthMsg('signupMsg', 'Supervisor account created. You can log in now.', true);
+            const rosterSnap = await getDoc(doc(db, 'roster', email));
+            if (!rosterSnap.exists()) {
+                await deleteUser(cred.user);
+                return showAuthMsg('signupMsg', 'This email was not found on the agent roster. Ask your supervisor to add you, then try again.', false);
+            }
+            const match = rosterSnap.data();
+
+            await setDoc(doc(db, 'users', cred.user.uid), {
+                email,
+                role: 'agent',
+                agentName: match.agentName,
+                agentId: match.agentId || ''
+            });
             await signOut(auth);
-            setTimeout(() => switchAuthTab('login'), 900);
+            showAuthMsg('signupMsg', `Account created and matched to "${match.agentName}". You can log in now.`, true);
+            clearSignupForm();
+            setTimeout(() => switchAuthTab('login'), 1200);
         } catch (err) {
+            // best-effort cleanup so a failed signup doesn't leave an orphaned auth account
+            try { await deleteUser(cred.user); } catch (e2) {}
             showAuthMsg('signupMsg', friendlyAuthError(err), false);
         }
-        return;
+    } finally {
+        authFlowInProgress = false;
     }
+}
 
-    // Agent path — account is created first (Firestore rules require being
-    // signed in to read the roster), then rolled back if there's no match.
-    let cred;
-    try {
-        cred = await createUserWithEmailAndPassword(auth, email, pw);
-    } catch (err) {
-        return showAuthMsg('signupMsg', friendlyAuthError(err), false);
-    }
-
-    try {
-        const rosterSnap = await getDoc(doc(db, 'roster', email));
-        if (!rosterSnap.exists()) {
-            await deleteUser(cred.user);
-            return showAuthMsg('signupMsg', 'This email was not found on the agent roster. Ask your supervisor to add you, then try again.', false);
-        }
-        const match = rosterSnap.data();
-
-        await setDoc(doc(db, 'users', cred.user.uid), {
-            email,
-            role: 'agent',
-            agentName: match.agentName,
-            agentId: match.agentId || ''
-        });
-        showAuthMsg('signupMsg', `Account created and matched to "${match.agentName}". You can log in now.`, true);
-        await signOut(auth);
-        setTimeout(() => switchAuthTab('login'), 900);
-    } catch (err) {
-        // best-effort cleanup so a failed signup doesn't leave an orphaned auth account
-        try { await deleteUser(cred.user); } catch (e2) {}
-        showAuthMsg('signupMsg', friendlyAuthError(err), false);
-    }
+function clearSignupForm() {
+    document.getElementById('signupEmail').value = '';
+    document.getElementById('signupPassword').value = '';
+    document.getElementById('signupPassword2').value = '';
+    const codeEl = document.getElementById('supervisorCode');
+    if (codeEl) codeEl.value = '';
 }
 
 async function handleLogin() {
@@ -135,16 +189,27 @@ async function handleLogin() {
     const pw = document.getElementById('loginPassword').value;
     if (!email || !pw) return showAuthMsg('loginMsg', 'Enter your email and password.', false);
 
+    authFlowInProgress = true;
     try {
-        await signInWithEmailAndPassword(auth, email, pw);
-        // onAuthStateChanged picks this up and calls enterApp()
+        const cred = await signInWithEmailAndPassword(auth, email, pw);
+        const profileSnap = await getDoc(doc(db, 'users', cred.user.uid));
+        if (!profileSnap.exists()) {
+            await signOut(auth);
+            return showAuthMsg('loginMsg', 'No profile found for this account. Contact your supervisor.', false);
+        }
+        currentSession = { uid: cred.user.uid, ...profileSnap.data() };
+        document.getElementById('loginEmail').value = '';
+        document.getElementById('loginPassword').value = '';
+        await enterApp();
     } catch (err) {
         showAuthMsg('loginMsg', friendlyAuthError(err), false);
+    } finally {
+        authFlowInProgress = false;
     }
 }
 
 function logout() {
-    signOut(auth);
+    signOut(auth); // onAuthStateChanged below handles the UI reset
 }
 
 function friendlyAuthError(err) {
@@ -156,19 +221,42 @@ function friendlyAuthError(err) {
     return 'Something went wrong: ' + (err && err.message ? err.message : 'please try again.');
 }
 
-/* Fires on load (if a session exists) and after every login/logout */
+/* Resets every piece of UI/state that could otherwise leak between two
+   different people using the same browser/station one after another. */
+function resetToLoggedOutState() {
+    currentSession = null;
+    cachedAuditRows = [];
+    document.getElementById('appScreen').style.display = 'none';
+    document.getElementById('authScreen').style.display = 'flex';
+    document.getElementById('sessionChip').style.display = 'none';
+    document.getElementById('loginEmail').value = '';
+    document.getElementById('loginPassword').value = '';
+    document.getElementById('loginMsg').className = 'auth-msg';
+    clearSignupForm();
+    switchAuthTab('login');
+
+    // clear anything the previous person's session had rendered
+    document.getElementById('agentAuditList').innerHTML = '';
+    document.getElementById('agentScorecard').innerHTML = '';
+    document.getElementById('agentWelcomeName').textContent = 'Welcome';
+    document.getElementById('rosterStatus').textContent = 'No roster loaded yet.';
+    document.getElementById('dataStatus').textContent = 'No audit data loaded yet.';
+    document.getElementById('resyncStatus').textContent = 'Use this if agents uploaded/updated after data was already loaded, or if an agent can\u2019t see rows that should be theirs.';
+}
+
+/* Fires on page load (if a session persisted) and after every sign-in/out —
+   except while handleSignup/handleLogin are already driving the UI
+   themselves (see authFlowInProgress above). */
 onAuthStateChanged(auth, async (user) => {
+    if (authFlowInProgress) return;
+
     if (!user) {
-        currentSession = null;
-        document.getElementById('appScreen').style.display = 'none';
-        document.getElementById('authScreen').style.display = 'flex';
-        document.getElementById('sessionChip').style.display = 'none';
+        resetToLoggedOutState();
         return;
     }
 
     const profileSnap = await getDoc(doc(db, 'users', user.uid));
     if (!profileSnap.exists()) {
-        // profile doc missing (shouldn't normally happen) — bail back to login
         await signOut(auth);
         return;
     }
@@ -329,6 +417,52 @@ async function refreshRosterStatus() {
     }
 }
 
+/* Re-match every existing auditData row to the current roster, without
+   requiring a fresh raw-data upload. Fixes the common case where the
+   roster was uploaded after the raw data, or an agent's name didn't
+   match exactly at the time of upload. */
+async function resyncAgentEmails() {
+    const statusEl = document.getElementById('resyncStatus');
+    statusEl.textContent = 'Re-syncing...';
+
+    try {
+        const rosterSnap = await getDocs(collection(db, 'roster'));
+        const nameToEmail = {};
+        rosterSnap.forEach(d => {
+            const data = d.data();
+            nameToEmail[(data.agentName || '').trim().toLowerCase()] = d.id;
+        });
+
+        const dataSnap = await getDocs(collection(db, 'auditData'));
+        const docs = dataSnap.docs;
+
+        let matched = 0, unmatched = 0;
+        const unmatchedNames = new Set();
+
+        for (let i = 0; i < docs.length; i += 400) {
+            const chunk = docs.slice(i, i + 400);
+            const batch = writeBatch(db);
+            chunk.forEach(d => {
+                const row = d.data();
+                const key = String(row['AGENT/OFFICER NAME'] || '').trim().toLowerCase();
+                const email = nameToEmail[key] || '';
+                if (email) matched++; else { unmatched++; if (key) unmatchedNames.add(row['AGENT/OFFICER NAME']); }
+                batch.update(doc(db, 'auditData', d.id), { agentEmailLower: email });
+            });
+            await batch.commit();
+        }
+
+        let msg = `✅ Re-synced: ${matched} rows matched to a roster email, ${unmatched} rows still unmatched.`;
+        if (unmatchedNames.size) {
+            msg += ` Unmatched names (check spelling against the roster): ${[...unmatchedNames].slice(0, 6).join(', ')}${unmatchedNames.size > 6 ? '…' : ''}`;
+        }
+        statusEl.textContent = msg;
+    } catch (err) {
+        console.error(err);
+        statusEl.textContent = '⚠️ Re-sync failed: ' + (err && err.message ? err.message : 'unknown error');
+    }
+}
+
 /* ==========================================================================
    RAW AUDIT DATA UPLOAD (Supervisor)
    ========================================================================== */
@@ -378,9 +512,9 @@ async function handleDataUpload(event) {
             return out;
         }).filter(r => r['AGENT/OFFICER NAME']);
 
-        await clearCollection('auditData');
-        await batchWriteDocs('auditData', trimmed);
+        await replaceAuditData(trimmed);
 
+        cachedAuditRows = trimmed; // avoid an extra Firestore read — we already have the fresh data locally
         document.getElementById('dataStatus').innerHTML = `✅ ${trimmed.length} audit rows loaded.`;
         populateDropdownOptions(trimmed);
         filterData();
@@ -411,13 +545,20 @@ function populateDropdownOptions(rows) {
     });
 }
 
+/* In-memory cache of the supervisor's audit data. Refetched only on login
+   and after an upload/resync — filtering (dropdowns) works off this copy
+   instead of re-reading the whole Firestore collection every time, which
+   is what was burning through the free-tier daily read quota. */
+let cachedAuditRows = [];
+
 async function loadAllAuditData() {
     const snap = await getDocs(collection(db, 'auditData'));
-    return snap.docs.map(d => d.data());
+    cachedAuditRows = snap.docs.map(d => d.data());
+    return cachedAuditRows;
 }
 
-async function filterData() {
-    const rows = await loadAllAuditData();
+function filterData() {
+    const rows = cachedAuditRows;
     if (!rows.length) return;
 
     const f = {
@@ -617,6 +758,7 @@ window.logout = logout;
 window.filterData = filterData;
 window.handleRosterUpload = handleRosterUpload;
 window.handleDataUpload = handleDataUpload;
+window.resyncAgentEmails = resyncAgentEmails;
 
 /* ==========================================================================
    INIT
