@@ -519,12 +519,23 @@ async function handleDataUpload(event) {
             nameToEmail[normalizeName(data.agentName)] = d.id;
         });
 
+        // Trim + normalize casing on the "dimension" columns so a stray space
+        // or inconsistent casing in the source file (e.g. "July" vs "JULY")
+        // doesn't split what's really one value into duplicate filter/group
+        // entries. FORM TYPE/MONTH/AGENT TENURE are small controlled
+        // vocabularies so they're safe to uppercase; names/brands are just
+        // trimmed so their display casing isn't changed.
+        const UPPERCASE_FIELDS = ['FORM TYPE', 'MONTH', 'AGENT TENURE'];
+        const TRIM_ONLY_FIELDS = ['BRAND', 'LINE OF BUSINESS', 'TEAM LEADER', 'CLUSTER', 'WEEKENDING'];
+
         const trimmed = rows.map(r => {
             const out = {};
             NEEDED_FIELDS.forEach(f => {
                 const h = headerMap[f];
                 out[f] = h ? r[h] : '';
             });
+            UPPERCASE_FIELDS.forEach(f => { out[f] = normVal(out[f]); });
+            TRIM_ONLY_FIELDS.forEach(f => { out[f] = String(out[f] || '').trim(); });
             // normalize scores to 0-100 numbers (source is a 0-1 fraction)
             ['RELIABLE', 'PERSONABLE', 'FAST', 'SAFE & SECURE', 'OVERALL SCORE'].forEach(k => {
                 const n = parseFloat(out[k]);
@@ -781,7 +792,7 @@ async function renderAgentView() {
     // click-to-expand header so the list doesn't turn into an endless scroll.
     const groups = {};
     sorted.forEach(r => {
-        const m = r['MONTH'] || 'Unspecified';
+        const m = normVal(r['MONTH']) || 'UNSPECIFIED';
         if (!groups[m]) groups[m] = [];
         groups[m].push(r);
     });
