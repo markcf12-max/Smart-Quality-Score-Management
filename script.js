@@ -583,6 +583,12 @@ async function loadAllAuditData() {
     return cachedAuditRows;
 }
 
+function resetFilters() {
+    ['selectFormType', 'selectBrand', 'selectMonth', 'selectWeekending', 'selectTenure', 'selectTeamLeader']
+        .forEach(id => { document.getElementById(id).value = 'ALL'; });
+    filterData();
+}
+
 function filterData() {
     const rows = cachedAuditRows;
     if (!rows.length) return;
@@ -812,6 +818,7 @@ window.handleSignup = handleSignup;
 window.handleLogin = handleLogin;
 window.logout = logout;
 window.filterData = filterData;
+window.resetFilters = resetFilters;
 window.handleRosterUpload = handleRosterUpload;
 window.handleDataUpload = handleDataUpload;
 window.resyncAgentEmails = resyncAgentEmails;
