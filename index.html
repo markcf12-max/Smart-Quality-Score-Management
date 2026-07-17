@@ -122,29 +122,48 @@
                 <div class="file-status" id="resyncStatus">Use this if agents uploaded/updated after data was already loaded, or if an agent can't see rows that should be theirs.</div>
             </div>
 
-            <div class="slicer-box">
-                <div class="slicer-header">FORM TYPE</div>
-                <select id="selectFormType" class="slicer-select" onchange="filterData()"><option value="ALL">(All Form Types)</option></select>
-            </div>
-            <div class="slicer-box">
-                <div class="slicer-header">BRAND</div>
-                <select id="selectBrand" class="slicer-select" onchange="filterData()"><option value="ALL">(All Brands)</option></select>
-            </div>
-            <div class="slicer-box">
-                <div class="slicer-header">MONTH</div>
-                <select id="selectMonth" class="slicer-select" onchange="filterData()"><option value="ALL">(All Months)</option></select>
-            </div>
-            <div class="slicer-box">
-                <div class="slicer-header">WEEKENDING</div>
-                <select id="selectWeekending" class="slicer-select" onchange="filterData()"><option value="ALL">(All Weekending)</option></select>
-            </div>
-            <div class="slicer-box">
-                <div class="slicer-header">AGENT TENURE</div>
-                <select id="selectTenure" class="slicer-select" onchange="filterData()"><option value="ALL">(All Tenures)</option></select>
-            </div>
-            <div class="slicer-box">
-                <div class="slicer-header">TEAM LEADER</div>
-                <select id="selectTeamLeader" class="slicer-select" onchange="filterData()"><option value="ALL">(All Team Leaders)</option></select>
+            <div class="filters-panel">
+                <div class="filters-panel-head">
+                    <span>🔎 Filters</span>
+                    <button type="button" class="filters-reset" onclick="resetFilters()">Reset</button>
+                </div>
+
+                <div class="filter-field">
+                    <label>Form Type</label>
+                    <div class="select-wrap">
+                        <select id="selectFormType" onchange="filterData()"><option value="ALL">(All Form Types)</option></select>
+                    </div>
+                </div>
+                <div class="filter-field">
+                    <label>Brand</label>
+                    <div class="select-wrap">
+                        <select id="selectBrand" onchange="filterData()"><option value="ALL">(All Brands)</option></select>
+                    </div>
+                </div>
+                <div class="filter-field">
+                    <label>Month</label>
+                    <div class="select-wrap">
+                        <select id="selectMonth" onchange="filterData()"><option value="ALL">(All Months)</option></select>
+                    </div>
+                </div>
+                <div class="filter-field">
+                    <label>Weekending</label>
+                    <div class="select-wrap">
+                        <select id="selectWeekending" onchange="filterData()"><option value="ALL">(All Weekending)</option></select>
+                    </div>
+                </div>
+                <div class="filter-field">
+                    <label>Agent Tenure</label>
+                    <div class="select-wrap">
+                        <select id="selectTenure" onchange="filterData()"><option value="ALL">(All Tenures)</option></select>
+                    </div>
+                </div>
+                <div class="filter-field">
+                    <label>Team Leader</label>
+                    <div class="select-wrap">
+                        <select id="selectTeamLeader" onchange="filterData()"><option value="ALL">(All Team Leaders)</option></select>
+                    </div>
+                </div>
             </div>
         </div>
 
