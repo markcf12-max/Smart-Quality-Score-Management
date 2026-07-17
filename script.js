@@ -796,6 +796,8 @@ async function renderAgentView() {
         if (!groups[m]) groups[m] = [];
         groups[m].push(r);
     });
+    console.log('Month groups for this agent — if you see more keys than expected, check the raw MONTH values listed below each:',
+        Object.keys(groups), sorted.map(r => JSON.stringify(r['MONTH'])));
     const orderedMonths = Object.keys(groups).sort((a, b) => {
         const aMax = groups[a].reduce((mx, r) => String(r['WEEKENDING'] || '') > mx ? String(r['WEEKENDING'] || '') : mx, '');
         const bMax = groups[b].reduce((mx, r) => String(r['WEEKENDING'] || '') > mx ? String(r['WEEKENDING'] || '') : mx, '');
