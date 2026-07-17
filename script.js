@@ -466,9 +466,11 @@ async function resyncAgentEmails() {
             await batch.commit();
         }
 
-        let msg = `✅ Re-synced: ${matched} rows matched to a roster email, ${unmatched} rows still unmatched.`;
+        let msg = `✅ Re-synced: ${matched} rows matched to a roster email, ${unmatched} rows still unmatched (${unmatchedNames.size} distinct agent name(s)).`;
         if (unmatchedNames.size) {
-            msg += ` Unmatched names (check spelling against the roster): ${[...unmatchedNames].slice(0, 6).join(', ')}${unmatchedNames.size > 6 ? '…' : ''}`;
+            const list = [...unmatchedNames];
+            msg += ` First few: ${list.slice(0, 6).join(' | ')}${list.length > 6 ? ' …' : ''} — full list logged to console.`;
+            console.warn('Unmatched agent names (not found on the roster, or spelled differently there):', list);
         }
         statusEl.textContent = msg;
     } catch (err) {
@@ -750,7 +752,7 @@ async function renderAgentView() {
 
     const sorted = [...myRows].sort((a, b) => String(b['WEEKENDING'] || '').localeCompare(String(a['WEEKENDING'] || '')));
 
-    document.getElementById('agentAuditList').innerHTML = sorted.map(r => {
+    const auditRowHtml = (r) => {
         const issues = getRowIssues(r);
         const score = r['OVERALL SCORE'];
         const passed = score !== null && score >= 85;
@@ -766,6 +768,36 @@ async function renderAgentView() {
             <div class="audit-meta">Team Leader: ${r['TEAM LEADER'] || '—'} · Cluster: ${r['CLUSTER'] || '—'} · Month: ${r['MONTH'] || '—'}</div>
             <div>${tagsHtml}</div>
         </div>`;
+    };
+
+    // Group by month, ordered by each group's most recent weekending —
+    // the newest month opens expanded, older months collapse under a
+    // click-to-expand header so the list doesn't turn into an endless scroll.
+    const groups = {};
+    sorted.forEach(r => {
+        const m = r['MONTH'] || 'Unspecified';
+        if (!groups[m]) groups[m] = [];
+        groups[m].push(r);
+    });
+    const orderedMonths = Object.keys(groups).sort((a, b) => {
+        const aMax = groups[a].reduce((mx, r) => String(r['WEEKENDING'] || '') > mx ? String(r['WEEKENDING'] || '') : mx, '');
+        const bMax = groups[b].reduce((mx, r) => String(r['WEEKENDING'] || '') > mx ? String(r['WEEKENDING'] || '') : mx, '');
+        return bMax.localeCompare(aMax);
+    });
+
+    document.getElementById('agentAuditList').innerHTML = orderedMonths.map((month, idx) => {
+        const rows = groups[month];
+        const monthAvg = (() => {
+            const vals = rows.map(r => r['OVERALL SCORE']).filter(v => v !== null && v !== undefined && !isNaN(v));
+            return vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
+        })();
+        return `<details class="month-group" ${idx === 0 ? 'open' : ''}>
+            <summary class="month-summary">
+                <span>${month} <span class="month-count">(${rows.length} audit${rows.length === 1 ? '' : 's'})</span></span>
+                <span class="month-avg">${monthAvg === null ? '' : 'avg ' + monthAvg + '%'}</span>
+            </summary>
+            <div class="month-body">${rows.map(auditRowHtml).join('')}</div>
+        </details>`;
     }).join('');
 }
 
