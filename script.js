@@ -321,6 +321,20 @@ function normVal(v) {
     return (v === undefined || v === null) ? '' : String(v).trim().toUpperCase();
 }
 
+/* Forgiving name comparison for matching roster entries to raw-data rows.
+   Strips accents/diacritics (Muñoz -> Munoz), punctuation, common suffixes
+   (Jr., Sr., II, III), and collapses extra whitespace — so small spelling
+   differences between the two files don't break the match. */
+function normalizeName(str) {
+    return String(str || '')
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .toUpperCase()
+        .replace(/[.,'-]/g, ' ')
+        .replace(/\b(JR|SR|II|III|IV)\b/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
 function getRowIssues(row) {
     const issues = [];
     HIT_PARAMS.forEach(p => {
@@ -430,7 +444,7 @@ async function resyncAgentEmails() {
         const nameToEmail = {};
         rosterSnap.forEach(d => {
             const data = d.data();
-            nameToEmail[(data.agentName || '').trim().toLowerCase()] = d.id;
+            nameToEmail[normalizeName(data.agentName)] = d.id;
         });
 
         const dataSnap = await getDocs(collection(db, 'auditData'));
@@ -444,7 +458,7 @@ async function resyncAgentEmails() {
             const batch = writeBatch(db);
             chunk.forEach(d => {
                 const row = d.data();
-                const key = String(row['AGENT/OFFICER NAME'] || '').trim().toLowerCase();
+                const key = normalizeName(row['AGENT/OFFICER NAME']);
                 const email = nameToEmail[key] || '';
                 if (email) matched++; else { unmatched++; if (key) unmatchedNames.add(row['AGENT/OFFICER NAME']); }
                 batch.update(doc(db, 'auditData', d.id), { agentEmailLower: email });
@@ -488,13 +502,19 @@ async function handleDataUpload(event) {
             if (h) headerMap[f] = h;
         });
 
+        const missingFields = NEEDED_FIELDS.filter(f => !headerMap[f]);
+        if (missingFields.length) {
+            console.warn('Columns not found in uploaded file:', missingFields);
+            console.log('Actual column headers in this file:', Object.keys(rows[0]));
+        }
+
         // build a name -> email lookup from the roster so each audit row can be
         // matched back to the agent's login email (needed for the agent's own query)
         const rosterSnap = await getDocs(collection(db, 'roster'));
         const nameToEmail = {};
         rosterSnap.forEach(d => {
             const data = d.data();
-            nameToEmail[(data.agentName || '').trim().toLowerCase()] = d.id;
+            nameToEmail[normalizeName(data.agentName)] = d.id;
         });
 
         const trimmed = rows.map(r => {
@@ -508,14 +528,18 @@ async function handleDataUpload(event) {
                 const n = parseFloat(out[k]);
                 out[k] = isNaN(n) ? null : (n <= 1 ? n * 100 : n);
             });
-            out.agentEmailLower = nameToEmail[String(out['AGENT/OFFICER NAME'] || '').trim().toLowerCase()] || '';
+            out.agentEmailLower = nameToEmail[normalizeName(out['AGENT/OFFICER NAME'])] || '';
             return out;
         }).filter(r => r['AGENT/OFFICER NAME']);
 
         await replaceAuditData(trimmed);
 
         cachedAuditRows = trimmed; // avoid an extra Firestore read — we already have the fresh data locally
-        document.getElementById('dataStatus').innerHTML = `✅ ${trimmed.length} audit rows loaded.`;
+        let msg = `✅ ${trimmed.length} audit rows loaded.`;
+        if (missingFields.length) {
+            msg += ` ⚠️ ${missingFields.length} expected column(s) weren't found in this file (so those parameters won't show as flagged) — check the browser console for the exact list.`;
+        }
+        document.getElementById('dataStatus').innerHTML = msg;
         populateDropdownOptions(trimmed);
         filterData();
     } catch (err) {
