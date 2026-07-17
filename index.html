@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SMART Quality Score and Cluster Management Dashboard</title>
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <link rel="stylesheet" href="styles.css">
 <script type="module" src="script.js"></script>
 </head>
@@ -118,6 +118,8 @@
                     <input type="file" id="dataFileInput" accept=".csv,.xlsx,.xls" onchange="handleDataUpload(event)">
                 </div>
                 <div class="file-status" id="dataStatus">No audit data loaded yet.</div>
+                <button class="btn-upload" style="background:#0f587d;border-color:#0f587d;" onclick="resyncAgentEmails()">🔄 Re-sync Agent Matching</button>
+                <div class="file-status" id="resyncStatus">Use this if agents uploaded/updated after data was already loaded, or if an agent can't see rows that should be theirs.</div>
             </div>
 
             <div class="slicer-box">
