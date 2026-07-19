@@ -292,30 +292,45 @@ async function enterApp() {
 /* ==========================================================================
    HIT-PARAMETER CONFIG
    Maps raw audit columns to plain-language "what was flagged" descriptions.
-   hitValue = the value in that column that counts as a miss/flag.
+
+   Two column types, because the source data uses different conventions:
+   - 'descriptive' (Reliable/Personable/Fast columns): usually "No Opportunity"
+     when there's nothing to flag, but when there IS an issue the cell often
+     contains the actual reason ("No ticket created", "Vague explanation")
+     rather than a plain "Yes". Any value that isn't a known "no issue"
+     marker counts as a hit, and the real text is shown when it's more
+     specific than a bare "Yes".
+   - 'boolean' (Safe & Secure/Mistreat columns): strict Yes/No/NA convention,
+     matched against an exact hitValue.
    ========================================================================== */
+const NON_ISSUE_VALUES = new Set(['', 'NO OPPORTUNITY', 'NA', 'N/A', 'NO', 'NONE']);
+
 const HIT_PARAMS = [
-    { col: 'IRRELEVANT SOLUTION', category: 'Reliable', label: 'Irrelevant solution given', hitValue: 'YES' },
-    { col: 'INCOMPLETE SOLUTION', category: 'Reliable', label: 'Incomplete solution given', hitValue: 'YES' },
-    { col: 'UNTIMELY SOLUTION ( ZTP)', category: 'Reliable', label: 'Untimely solution (ZTP)', hitValue: 'YES' },
-    { col: 'UNCLEAR SOLUTION', category: 'Reliable', label: 'Unclear solution given', hitValue: 'YES' },
-    { col: 'Poor Listening Skills?', category: 'Personable', label: 'Poor listening skills', hitValue: 'YES' },
-    { col: 'Customer Validation and Empathy Gap?', category: 'Personable', label: 'Empathy / validation gap', hitValue: 'YES' },
-    { col: 'Did not adjust the tone/pace to match the customer?', category: 'Personable', label: 'Tone/pace not matched to customer', hitValue: 'YES' },
-    { col: 'Did not adjust to the customers language?', category: 'Personable', label: 'Language not adjusted to customer', hitValue: 'YES' },
-    { col: 'Negative Words, Phrasing and Limitations?', category: 'Personable', label: 'Negative words / phrasing used', hitValue: 'YES' },
-    { col: 'Unfriendly/discourteous/sarcastic?', category: 'Personable', label: 'Unfriendly, discourteous, or sarcastic tone', hitValue: 'YES' },
-    { col: 'Sounded transactional or robotic?', category: 'Personable', label: 'Sounded transactional or robotic', hitValue: 'YES' },
-    { col: 'FAST: Were there other Agent factors observed that affected the customer experience?', category: 'Fast', label: 'Other agent factor slowed the resolution', hitValue: 'YES' },
-    { col: 'DID WE FOLLOW THE CUSTOMER AUTHENTICATION PROCESS?', category: 'Safe & Secure', label: 'Customer authentication process missed', hitValue: 'NO' },
-    { col: 'DID WE FOLLOW THE DATA PRIVACY POLICY?', category: 'Safe & Secure', label: 'Data privacy policy not followed', hitValue: 'NO' },
-    { col: 'DID WE UPDATE THE CUSTOMER INFORMATION IN THE TOOL?', category: 'Safe & Secure', label: 'Customer info not updated in tool', hitValue: 'NO' },
-    { col: 'DID WE FOLLOW THE CSAT/NPS PROCESS?', category: 'Safe & Secure', label: 'CSAT/NPS process not followed', hitValue: 'NO' },
-    { col: 'DID WE FOLLOW THE SYSTEM DOCUMENTATION PROCESS?', category: 'Safe & Secure', label: 'System documentation process missed', hitValue: 'NO' },
-    { col: 'DID WE FOLLOW THE SYSTEM TAGGING PROCESS?', category: 'Safe & Secure', label: 'System tagging process missed', hitValue: 'NO' },
-    { col: 'DID WE FOLLOW CORRECT GRAMMAR, TECHNICAL WRITING & THE PRESCRIBED LANGUAGE?', category: 'Safe & Secure', label: 'Grammar / prescribed language standard missed', hitValue: 'NO' },
-    { col: "IS THIS A POTENTIAL CUSTOMER MISTREAT?", category: 'Mistreat', label: 'Potential customer mistreat flagged', hitValue: 'YES' }
+    { col: 'IRRELEVANT SOLUTION', category: 'Reliable', label: 'Irrelevant solution given', type: 'descriptive' },
+    { col: 'INCOMPLETE SOLUTION', category: 'Reliable', label: 'Incomplete solution given', type: 'descriptive' },
+    { col: 'UNTIMELY SOLUTION ( ZTP)', category: 'Reliable', label: 'Untimely solution (ZTP)', type: 'descriptive' },
+    { col: 'UNCLEAR SOLUTION', category: 'Reliable', label: 'Unclear solution given', type: 'descriptive' },
+    { col: 'Poor Listening Skills?', category: 'Personable', label: 'Poor listening skills', type: 'descriptive' },
+    { col: 'Customer Validation and Empathy Gap?', category: 'Personable', label: 'Empathy / validation gap', type: 'descriptive' },
+    { col: 'Did not adjust the tone/pace to match the customer?', category: 'Personable', label: 'Tone/pace not matched to customer', type: 'descriptive' },
+    { col: 'Did not adjust to the customers language?', category: 'Personable', label: 'Language not adjusted to customer', type: 'descriptive' },
+    { col: 'Negative Words, Phrasing and Limitations?', category: 'Personable', label: 'Negative words / phrasing used', type: 'descriptive' },
+    { col: 'Unfriendly/discourteous/sarcastic?', category: 'Personable', label: 'Unfriendly, discourteous, or sarcastic tone', type: 'descriptive' },
+    { col: 'Sounded transactional or robotic?', category: 'Personable', label: 'Sounded transactional or robotic', type: 'descriptive' },
+    { col: 'FAST: Were there other Agent factors observed that affected the customer experience?', category: 'Fast', label: 'Other agent factor slowed the resolution', type: 'descriptive' },
+    { col: 'DID WE FOLLOW THE CUSTOMER AUTHENTICATION PROCESS?', category: 'Safe & Secure', label: 'Customer authentication process missed', type: 'boolean', hitValue: 'NO' },
+    { col: 'DID WE FOLLOW THE DATA PRIVACY POLICY?', category: 'Safe & Secure', label: 'Data privacy policy not followed', type: 'boolean', hitValue: 'NO' },
+    { col: 'DID WE UPDATE THE CUSTOMER INFORMATION IN THE TOOL?', category: 'Safe & Secure', label: 'Customer info not updated in tool', type: 'boolean', hitValue: 'NO' },
+    { col: 'DID WE FOLLOW THE CSAT/NPS PROCESS?', category: 'Safe & Secure', label: 'CSAT/NPS process not followed', type: 'boolean', hitValue: 'NO' },
+    { col: 'DID WE FOLLOW THE SYSTEM DOCUMENTATION PROCESS?', category: 'Safe & Secure', label: 'System documentation process missed', type: 'boolean', hitValue: 'NO' },
+    { col: 'DID WE FOLLOW THE SYSTEM TAGGING PROCESS?', category: 'Safe & Secure', label: 'System tagging process missed', type: 'boolean', hitValue: 'NO' },
+    { col: 'DID WE FOLLOW CORRECT GRAMMAR, TECHNICAL WRITING & THE PRESCRIBED LANGUAGE?', category: 'Safe & Secure', label: 'Grammar / prescribed language standard missed', type: 'boolean', hitValue: 'NO' },
+    { col: "IS THIS A POTENTIAL CUSTOMER MISTREAT?", category: 'Mistreat', label: 'Potential customer mistreat flagged', type: 'boolean', hitValue: 'YES' }
 ];
+
+function escapeHtml(str) {
+    return String(str || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
 
 function normVal(v) {
     return (v === undefined || v === null) ? '' : String(v).trim().toUpperCase();
@@ -338,9 +353,21 @@ function normalizeName(str) {
 function getRowIssues(row) {
     const issues = [];
     HIT_PARAMS.forEach(p => {
-        const v = normVal(row[p.col]);
-        if (v && v === p.hitValue) {
-            issues.push({ label: p.label, category: p.category });
+        const raw = row[p.col];
+        const v = normVal(raw);
+        if (!v) return;
+
+        if (p.type === 'boolean') {
+            if (v === p.hitValue) issues.push({ label: p.label, category: p.category });
+            return;
+        }
+
+        // descriptive: anything that isn't a known "no issue" marker is a hit.
+        // If the cell has real text beyond a bare "Yes", show that instead of
+        // the generic label — it's the actual reason the auditor wrote down.
+        if (!NON_ISSUE_VALUES.has(v)) {
+            const detail = v !== 'YES' ? String(raw).trim() : '';
+            issues.push({ label: detail ? `${p.label} — ${detail}` : p.label, category: p.category });
         }
     });
     return issues;
@@ -486,7 +513,8 @@ const NEEDED_FIELDS = [
     'FORM TYPE', 'BRAND', 'LINE OF BUSINESS', 'AGENT/OFFICER NAME', 'AGENT TENURE',
     'TEAM LEADER', 'CLUSTER', 'WEEKENDING', 'MONTH', 'MISTREAT',
     'RELIABLE', 'PERSONABLE', 'FAST', 'SAFE & SECURE', 'OVERALL SCORE',
-    'EE number/ID number', 'OVERALL PASSRATE', 'CM'
+    'EE number/ID number', 'OVERALL PASSRATE', 'CM',
+    'RELIABLE: ADDITIONAL COMMENTS', 'PERSONABLE: ADDITIONAL COMMENTS', 'FAST: ADDITIONAL COMMENTS'
 ].concat(HIT_PARAMS.map(p => p.col));
 
 async function handleDataUpload(event) {
@@ -797,21 +825,29 @@ async function renderAgentView() {
 
     const sorted = [...myRows].sort((a, b) => String(b['WEEKENDING'] || '').localeCompare(String(a['WEEKENDING'] || '')));
 
-    const auditRowHtml = (r) => {
+const auditRowHtml = (r) => {
         const issues = getRowIssues(r);
         const score = r['OVERALL SCORE'];
         const passed = r['OVERALL PASSRATE'] ? r['OVERALL PASSRATE'] === 'PASSED' : (score !== null && score >= 85);
         const tagsHtml = issues.length
-            ? issues.map(i => `<span class="tag ${i.category.replace(/\s|&/g, '')}">${i.label}</span>`).join('')
+            ? issues.map(i => `<span class="tag ${i.category.replace(/\s|&/g, '')}">${escapeHtml(i.label)}</span>`).join('')
             : `<span class="no-issues-note">✓ No parameters flagged on this audit.</span>`;
+
+        const comments = ['RELIABLE: ADDITIONAL COMMENTS', 'PERSONABLE: ADDITIONAL COMMENTS', 'FAST: ADDITIONAL COMMENTS']
+            .map(f => String(r[f] || '').trim())
+            .filter(c => c && !NON_ISSUE_VALUES.has(c.toUpperCase()));
+        const commentsHtml = comments.length
+            ? `<div class="audit-comments">${comments.map(c => `<p>${escapeHtml(c)}</p>`).join('')}</div>`
+            : '';
 
         return `<div class="audit-row">
             <div class="audit-head">
-                <span>${r['WEEKENDING'] || ''} · ${r['FORM TYPE'] || ''} · ${r['BRAND'] || ''}</span>
+                <span>${escapeHtml(r['WEEKENDING'])} · ${escapeHtml(r['FORM TYPE'])} · ${escapeHtml(r['BRAND'])}</span>
                 <span class="score-pill ${passed ? 'pass-pill' : 'fail-pill'}">${score === null ? '-' : score + '%'}</span>
             </div>
-            <div class="audit-meta">Team Leader: ${r['TEAM LEADER'] || '—'} · Cluster: ${r['CLUSTER'] || '—'} · Month: ${r['MONTH'] || '—'}</div>
+            <div class="audit-meta">Team Leader: ${escapeHtml(r['TEAM LEADER']) || '—'} · Cluster: ${escapeHtml(r['CLUSTER']) || '—'} · Month: ${escapeHtml(r['MONTH']) || '—'}</div>
             <div>${tagsHtml}</div>
+            ${commentsHtml}
         </div>`;
     };
 
