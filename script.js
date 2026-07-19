@@ -486,7 +486,7 @@ const NEEDED_FIELDS = [
     'FORM TYPE', 'BRAND', 'LINE OF BUSINESS', 'AGENT/OFFICER NAME', 'AGENT TENURE',
     'TEAM LEADER', 'CLUSTER', 'WEEKENDING', 'MONTH', 'MISTREAT',
     'RELIABLE', 'PERSONABLE', 'FAST', 'SAFE & SECURE', 'OVERALL SCORE',
-    'EE number/ID number'
+    'EE number/ID number', 'OVERALL PASSRATE', 'CM'
 ].concat(HIT_PARAMS.map(p => p.col));
 
 async function handleDataUpload(event) {
@@ -525,7 +525,7 @@ async function handleDataUpload(event) {
         // entries. FORM TYPE/MONTH/AGENT TENURE are small controlled
         // vocabularies so they're safe to uppercase; names/brands are just
         // trimmed so their display casing isn't changed.
-        const UPPERCASE_FIELDS = ['FORM TYPE', 'MONTH', 'AGENT TENURE'];
+        const UPPERCASE_FIELDS = ['FORM TYPE', 'MONTH', 'AGENT TENURE', 'OVERALL PASSRATE', 'CM'];
         const TRIM_ONLY_FIELDS = ['BRAND', 'LINE OF BUSINESS', 'TEAM LEADER', 'CLUSTER', 'WEEKENDING'];
 
         const trimmed = rows.map(r => {
@@ -545,10 +545,23 @@ async function handleDataUpload(event) {
             return out;
         }).filter(r => r['AGENT/OFFICER NAME']);
 
-        await replaceAuditData(trimmed);
+        // Collapse exact duplicate rows (same audit exported more than once).
+        // Every tracked field must match — not just a few — so two genuinely
+        // different audits that happen to share some fields never get merged.
+        const seenKeys = new Set();
+        const deduped = [];
+        trimmed.forEach(row => {
+            const key = NEEDED_FIELDS.map(f => String(row[f])).join('||');
+            if (seenKeys.has(key)) return;
+            seenKeys.add(key);
+            deduped.push(row);
+        });
+        const dupCount = trimmed.length - deduped.length;
 
-        cachedAuditRows = trimmed; // avoid an extra Firestore read — we already have the fresh data locally
-        let msg = `✅ ${trimmed.length} audit rows loaded.`;
+        await replaceAuditData(deduped);
+
+        cachedAuditRows = deduped; // avoid an extra Firestore read — we already have the fresh data locally
+        let msg = `✅ ${deduped.length} audit rows loaded${dupCount ? ` (${dupCount} exact duplicate row${dupCount === 1 ? '' : 's'} removed)` : ''}.`;
         if (missingFields.length) {
             msg += ` ⚠️ ${missingFields.length} expected column(s) weren't found in this file (so those parameters won't show as flagged) — check the browser console for the exact list.`;
         }
@@ -636,6 +649,8 @@ function renderSupervisorDashboard(data) {
     if (!data.length) {
         document.getElementById('totalPassRateVal').textContent = '-';
         document.getElementById('totalFailRateVal').textContent = '-';
+        document.getElementById('cmSuperstarVal').textContent = '-';
+        document.getElementById('cmUnderperformerVal').textContent = '-';
         document.getElementById('leaderChart').innerHTML = '<div class="empty-note">No matching data.</div>';
         document.getElementById('clusterChart').innerHTML = '<div class="empty-note">No matching data.</div>';
         document.getElementById('topHitsTable').querySelector('tbody').innerHTML = '<tr><td colspan="3" class="empty-note">No matching data.</td></tr>';
@@ -661,7 +676,8 @@ function renderSupervisorDashboard(data) {
     setBar('valSecure', 'barSecure', avgSecure);
     setBar('valOverall', 'barOverall', avgOverall);
 
-    const passed = data.filter(r => (r['OVERALL SCORE'] || 0) >= 85).length;
+    const isPassed = (r) => r['OVERALL PASSRATE'] ? r['OVERALL PASSRATE'] === 'PASSED' : (r['OVERALL SCORE'] || 0) >= 85;
+    const passed = data.filter(isPassed).length;
     const passPct = Math.round((passed / data.length) * 100);
     document.getElementById('totalPassRateVal').textContent = passPct + '%';
     document.getElementById('totalFailRateVal').textContent = (100 - passPct) + '%';
@@ -680,6 +696,18 @@ function renderSupervisorDashboard(data) {
     document.getElementById('totalAvg31').textContent = bucketAvg(buckets.b2);
     document.getElementById('totalAvg91').textContent = bucketAvg(buckets.b3);
     document.getElementById('totalAvgTotal').textContent = avgOverall === null ? '-' : avgOverall + '%';
+
+    // CM Distribution — uses the authoritative CM column from the source
+    // data (SUPERSTAR / UNDERPERFORMER) rather than a guessed threshold.
+    const cmRows = data.filter(r => r['CM']);
+    if (cmRows.length) {
+        const superstar = cmRows.filter(r => r['CM'] === 'SUPERSTAR').length;
+        document.getElementById('cmSuperstarVal').textContent = Math.round((superstar / cmRows.length) * 100) + '%';
+        document.getElementById('cmUnderperformerVal').textContent = Math.round(((cmRows.length - superstar) / cmRows.length) * 100) + '%';
+    } else {
+        document.getElementById('cmSuperstarVal').textContent = '-';
+        document.getElementById('cmUnderperformerVal').textContent = '-';
+    }
 
     // Team leader chart
     const tlScores = {};
@@ -772,7 +800,7 @@ async function renderAgentView() {
     const auditRowHtml = (r) => {
         const issues = getRowIssues(r);
         const score = r['OVERALL SCORE'];
-        const passed = score !== null && score >= 85;
+        const passed = r['OVERALL PASSRATE'] ? r['OVERALL PASSRATE'] === 'PASSED' : (score !== null && score >= 85);
         const tagsHtml = issues.length
             ? issues.map(i => `<span class="tag ${i.category.replace(/\s|&/g, '')}">${i.label}</span>`).join('')
             : `<span class="no-issues-note">✓ No parameters flagged on this audit.</span>`;
