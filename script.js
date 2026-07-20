@@ -510,7 +510,7 @@ async function resyncAgentEmails() {
    RAW AUDIT DATA UPLOAD (Supervisor)
    ========================================================================== */
 const NEEDED_FIELDS = [
-    'FORM TYPE', 'BRAND', 'LINE OF BUSINESS', 'AGENT/OFFICER NAME', 'AGENT TENURE',
+    'ID', 'FORM TYPE', 'BRAND', 'LINE OF BUSINESS', 'AGENT/OFFICER NAME', 'AGENT TENURE',
     'TEAM LEADER', 'CLUSTER', 'WEEKENDING', 'MONTH', 'MISTREAT',
     'RELIABLE', 'PERSONABLE', 'FAST', 'SAFE & SECURE', 'OVERALL SCORE',
     'EE number/ID number', 'OVERALL PASSRATE', 'CM',
@@ -574,12 +574,16 @@ async function handleDataUpload(event) {
         }).filter(r => r['AGENT/OFFICER NAME']);
 
         // Collapse exact duplicate rows (same audit exported more than once).
-        // Every tracked field must match — not just a few — so two genuinely
-        // different audits that happen to share some fields never get merged.
+        // Prefer the file's own unique ID column — Call ID/Case Number can
+        // legitimately repeat (a case can get multiple audits), so it's not
+        // a safe dedup key, but the leading "ID" column is one row per
+        // submission. Fall back to comparing every tracked field only if
+        // that column isn't present in this file.
+        const hasIdColumn = !!headerMap['ID'];
         const seenKeys = new Set();
         const deduped = [];
         trimmed.forEach(row => {
-            const key = NEEDED_FIELDS.map(f => String(row[f])).join('||');
+            const key = hasIdColumn ? String(row['ID']) : NEEDED_FIELDS.map(f => String(row[f])).join('||');
             if (seenKeys.has(key)) return;
             seenKeys.add(key);
             deduped.push(row);
