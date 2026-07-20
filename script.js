@@ -110,12 +110,15 @@ function showAuthMsg(elId, text, ok) {
    drive enterApp() itself deterministically instead of racing the listener. */
 let authFlowInProgress = false;
 
+const REQUIRED_EMAIL_DOMAIN = '@supplier.smart.com.ph';
+
 async function handleSignup() {
     const email = document.getElementById('signupEmail').value.trim().toLowerCase();
     const pw = document.getElementById('signupPassword').value;
     const pw2 = document.getElementById('signupPassword2').value;
 
     if (!email || !email.includes('@')) return showAuthMsg('signupMsg', 'Enter a valid work email.', false);
+    if (!email.endsWith(REQUIRED_EMAIL_DOMAIN)) return showAuthMsg('signupMsg', `Please sign up using your ${REQUIRED_EMAIL_DOMAIN} work email.`, false);
     if (pw.length < 6) return showAuthMsg('signupMsg', 'Password must be at least 6 characters.', false);
     if (pw !== pw2) return showAuthMsg('signupMsg', 'Passwords do not match.', false);
 
