@@ -14,7 +14,8 @@ import {
     collection, query, where, getDocs, writeBatch
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
-const SUPERVISOR_INVITE_CODE = 'SMART-ADMIN-2026'; // client-side only — fine for a prototype, replace with a Cloud Function check before real use
+const TEAM_LEADER_INVITE_CODE = 'SMART-TL-2026'; // client-side only — fine for a prototype, replace with a Cloud Function check before real use
+const QUALITY_INVITE_CODE = 'SMART-QA-2026'; // client-side only — same caveat as above
 
 /* Firestore write batches max out at 500 ops — chunk anything bigger */
 async function batchWriteDocs(collectionName, docs, idFn) {
@@ -91,8 +92,13 @@ let signupRole = 'agent';
 function setSignupRole(role) {
     signupRole = role;
     document.getElementById('roleAgentLabel').classList.toggle('checked', role === 'agent');
-    document.getElementById('roleSupervisorLabel').classList.toggle('checked', role === 'supervisor');
-    document.getElementById('supervisorCodeGroup').style.display = role === 'supervisor' ? 'block' : 'none';
+    document.getElementById('roleTeamLeaderLabel').classList.toggle('checked', role === 'team_leader');
+    document.getElementById('roleQualityLabel').classList.toggle('checked', role === 'quality');
+    const needsCode = role === 'team_leader' || role === 'quality';
+    document.getElementById('supervisorCodeGroup').style.display = needsCode ? 'block' : 'none';
+    if (needsCode) {
+        document.getElementById('supervisorCodeLabel').textContent = role === 'team_leader' ? 'Team Leader Invite Code' : 'Quality Invite Code';
+    }
 }
 
 function showAuthMsg(elId, text, ok) {
@@ -124,9 +130,10 @@ async function handleSignup() {
 
     authFlowInProgress = true;
     try {
-        if (signupRole === 'supervisor') {
+        if (signupRole === 'team_leader' || signupRole === 'quality') {
+            const requiredCode = signupRole === 'team_leader' ? TEAM_LEADER_INVITE_CODE : QUALITY_INVITE_CODE;
             const code = document.getElementById('supervisorCode').value.trim();
-            if (code !== SUPERVISOR_INVITE_CODE) return showAuthMsg('signupMsg', 'Invalid supervisor invite code.', false);
+            if (code !== requiredCode) return showAuthMsg('signupMsg', 'Invalid invite code.', false);
 
             let cred;
             try {
@@ -134,9 +141,9 @@ async function handleSignup() {
             } catch (err) {
                 return showAuthMsg('signupMsg', friendlyAuthError(err), false);
             }
-            await setDoc(doc(db, 'users', cred.user.uid), { email, role: 'supervisor' });
+            await setDoc(doc(db, 'users', cred.user.uid), { email, role: signupRole });
             await signOut(auth);
-            showAuthMsg('signupMsg', 'Supervisor account created. You can log in now.', true);
+            showAuthMsg('signupMsg', `${signupRole === 'team_leader' ? 'Team Leader' : 'Quality'} account created. You can log in now.`, true);
             clearSignupForm();
             setTimeout(() => switchAuthTab('login'), 1200);
             return;
@@ -245,6 +252,7 @@ function resetToLoggedOutState() {
     document.getElementById('rosterStatus').textContent = 'No roster loaded yet.';
     document.getElementById('dataStatus').textContent = 'No audit data loaded yet.';
     document.getElementById('resyncStatus').textContent = 'Use this if agents uploaded/updated after data was already loaded, or if an agent can\u2019t see rows that should be theirs.';
+    document.getElementById('uploadPopover').style.display = 'none';
 }
 
 /* Fires on page load (if a session persisted) and after every sign-in/out —
@@ -271,19 +279,24 @@ async function enterApp() {
     document.getElementById('authScreen').style.display = 'none';
     document.getElementById('appScreen').style.display = 'flex';
     document.getElementById('sessionChip').style.display = 'flex';
-    document.getElementById('sessionLabel').textContent =
-        (currentSession.role === 'supervisor' ? '👤 Supervisor · ' : '👤 Agent · ') + currentSession.email;
 
-    const isSupervisor = currentSession.role === 'supervisor';
-    document.getElementById('supervisorSidebar').style.display = isSupervisor ? 'flex' : 'none';
-    document.getElementById('supervisorView').style.display = isSupervisor ? 'flex' : 'none';
-    document.getElementById('agentView').style.display = isSupervisor ? 'none' : 'flex';
+    const roleLabels = { quality: '👤 Quality · ', team_leader: '👤 Team Leader · ', supervisor: '👤 Quality · ', agent: '👤 Agent · ' };
+    document.getElementById('sessionLabel').textContent = (roleLabels[currentSession.role] || '👤 ') + currentSession.email;
 
-    if (isSupervisor) {
-        await refreshRosterStatus();
+    // 'supervisor' kept as a legacy alias for 'quality' (full access) in case any older accounts still have that role
+    const canViewDashboard = currentSession.role === 'quality' || currentSession.role === 'team_leader' || currentSession.role === 'supervisor';
+    const canUpload = currentSession.role === 'quality' || currentSession.role === 'supervisor';
+
+    document.getElementById('supervisorSidebar').style.display = canViewDashboard ? 'flex' : 'none';
+    document.getElementById('supervisorView').style.display = canViewDashboard ? 'flex' : 'none';
+    document.getElementById('agentView').style.display = canViewDashboard ? 'none' : 'flex';
+    document.getElementById('uploadIconBtn').style.display = canUpload ? 'flex' : 'none';
+
+    if (canViewDashboard) {
+        if (canUpload) await refreshRosterStatus();
         const rows = await loadAllAuditData();
         if (rows.length) {
-            document.getElementById('dataStatus').innerHTML = `✅ ${rows.length} audit rows loaded.`;
+            if (canUpload) document.getElementById('dataStatus').innerHTML = `✅ ${rows.length} audit rows loaded.`;
             populateDropdownOptions(rows);
             filterData();
         }
@@ -642,6 +655,11 @@ async function loadAllAuditData() {
     return cachedAuditRows;
 }
 
+function toggleUploadPanel() {
+    const panel = document.getElementById('uploadPopover');
+    panel.style.display = panel.style.display === 'none' ? 'flex' : 'none';
+}
+
 function resetFilters() {
     ['selectFormType', 'selectBrand', 'selectMonth', 'selectWeekending', 'selectTenure', 'selectTeamLeader']
         .forEach(id => { document.getElementById(id).value = 'ALL'; });
@@ -689,6 +707,7 @@ function renderSupervisorDashboard(data) {
         document.getElementById('leaderChart').innerHTML = '<div class="empty-note">No matching data.</div>';
         document.getElementById('clusterChart').innerHTML = '<div class="empty-note">No matching data.</div>';
         document.getElementById('topHitsTable').querySelector('tbody').innerHTML = '<tr><td colspan="3" class="empty-note">No matching data.</td></tr>';
+        document.getElementById('clusterDistTable').querySelector('tbody').innerHTML = '<tr><td colspan="7" class="empty-note">No matching data.</td></tr>';
         return;
     }
 
@@ -792,6 +811,38 @@ function renderSupervisorDashboard(data) {
             return `<tr><td style="text-align:left;">${label}</td><td>${category}</td><td>${count}</td></tr>`;
         }).join('')
         : '<tr><td colspan="3" class="empty-note">No parameters flagged in this selection.</td></tr>';
+
+    // Cluster Score Distribution — % of each cluster's audits falling into
+    // each score range, so a supervisor can see e.g. "Cluster D has 30% of
+    // its audits below 60%" at a glance rather than just an average.
+    const distBuckets = [
+        { label: '90–100%', test: s => s >= 90 },
+        { label: '80–89%', test: s => s >= 80 && s < 90 },
+        { label: '70–79%', test: s => s >= 70 && s < 80 },
+        { label: '60–69%', test: s => s >= 60 && s < 70 },
+        { label: 'Below 60%', test: s => s < 60 }
+    ];
+    const clusterRows = {};
+    data.forEach(r => {
+        const c = r['CLUSTER'] || 'Unassigned';
+        if (r['OVERALL SCORE'] === null || r['OVERALL SCORE'] === undefined) return;
+        if (!clusterRows[c]) clusterRows[c] = [];
+        clusterRows[c].push(r['OVERALL SCORE']);
+    });
+    const clusterDistBody = document.getElementById('clusterDistTable').querySelector('tbody');
+    const clusterNames = Object.keys(clusterRows).sort();
+    clusterDistBody.innerHTML = clusterNames.length
+        ? clusterNames.map(c => {
+            const scores = clusterRows[c];
+            const total = scores.length;
+            const pctCells = distBuckets.map(b => {
+                const count = scores.filter(b.test).length;
+                const pct = total ? Math.round((count / total) * 100) : 0;
+                return `<td>${pct}%</td>`;
+            }).join('');
+            return `<tr><td style="font-weight:bold;">${c}</td>${pctCells}<td>${total}</td></tr>`;
+        }).join('')
+        : '<tr><td colspan="7" class="empty-note">No matching data.</td></tr>';
 }
 
 /* ==========================================================================
@@ -903,6 +954,7 @@ window.handleLogin = handleLogin;
 window.logout = logout;
 window.filterData = filterData;
 window.resetFilters = resetFilters;
+window.toggleUploadPanel = toggleUploadPanel;
 window.handleRosterUpload = handleRosterUpload;
 window.handleDataUpload = handleDataUpload;
 window.resyncAgentEmails = resyncAgentEmails;
