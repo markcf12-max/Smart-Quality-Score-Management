@@ -13,8 +13,7 @@
 <!-- ============ HEADER ============ -->
 <div class="header-banner">
     <div class="header-left">
-        <span class="header-logo">SMART</span>
-        <span style="font-size: 12px; font-weight: bold; color: #ffcc00; border-left: 1px solid #5cb85c; padding-left: 12px;">Enterprise</span>
+        <span class="header-logo">SMART Quality Management</span>
     </div>
     <div class="header-title">
         <h1>SMART Quality Score and Cluster Management</h1>
@@ -59,8 +58,9 @@
             <p class="sub">Sign up with your @supplier.smart.com.ph work email. Agents are matched automatically to their audit scores using the roster your supervisor uploaded.</p>
 
             <div class="role-toggle">
-                <label id="roleAgentLabel" class="checked" onclick="setSignupRole('agent')"><span>I'm an Agent</span></label>
-                <label id="roleSupervisorLabel" onclick="setSignupRole('supervisor')"><span>I'm a Supervisor</span></label>
+                <label id="roleAgentLabel" class="checked" onclick="setSignupRole('agent')"><span>Agent</span></label>
+                <label id="roleTeamLeaderLabel" onclick="setSignupRole('team_leader')"><span>Team Leader</span></label>
+                <label id="roleQualityLabel" onclick="setSignupRole('quality')"><span>Quality</span></label>
             </div>
 
             <div class="form-group">
@@ -80,7 +80,7 @@
             </div>
 
             <div class="form-group" id="supervisorCodeGroup" style="display:none;">
-                <label>Supervisor Invite Code</label>
+                <label id="supervisorCodeLabel">Invite Code</label>
                 <input type="text" id="supervisorCode" placeholder="Enter the invite code given by your admin">
             </div>
 
@@ -100,26 +100,30 @@
 
         <!-- ===== SUPERVISOR VIEW ===== -->
         <div class="sidebar" id="supervisorSidebar" style="display:none;">
-            <div class="brand-logo-panel"><h2>Smart</h2></div>
-
-            <div class="upload-section">
-                <h4>1. Agent Roster</h4>
-                <div class="upload-btn-wrapper">
-                    <button class="btn-upload">📇 Upload Roster (Email/Name/ID)</button>
-                    <input type="file" id="rosterFileInput" accept=".csv,.xlsx,.xls" onchange="handleRosterUpload(event)">
-                </div>
-                <div class="file-status" id="rosterStatus">No roster loaded yet.</div>
+            <div class="sidebar-top-row">
+                <button class="upload-icon-btn" id="uploadIconBtn" onclick="toggleUploadPanel()" title="Upload / manage data">📁<span class="upload-icon-label">Data</span></button>
             </div>
 
-            <div class="upload-section">
-                <h4>2. Raw Audit Data</h4>
-                <div class="upload-btn-wrapper">
-                    <button class="btn-upload">📁 Upload Raw Data</button>
-                    <input type="file" id="dataFileInput" accept=".csv,.xlsx,.xls" onchange="handleDataUpload(event)">
+            <div class="upload-popover" id="uploadPopover" style="display:none;">
+                <div class="upload-section">
+                    <h4>1. Agent Roster</h4>
+                    <div class="upload-btn-wrapper">
+                        <button class="btn-upload">📇 Upload Roster (Email/Name/ID)</button>
+                        <input type="file" id="rosterFileInput" accept=".csv,.xlsx,.xls" onchange="handleRosterUpload(event)">
+                    </div>
+                    <div class="file-status" id="rosterStatus">No roster loaded yet.</div>
                 </div>
-                <div class="file-status" id="dataStatus">No audit data loaded yet.</div>
-                <button class="btn-upload" style="background:#0f587d;border-color:#0f587d;" onclick="resyncAgentEmails()">🔄 Re-sync Agent Matching</button>
-                <div class="file-status" id="resyncStatus">Use this if agents uploaded/updated after data was already loaded, or if an agent can't see rows that should be theirs.</div>
+
+                <div class="upload-section">
+                    <h4>2. Raw Audit Data</h4>
+                    <div class="upload-btn-wrapper">
+                        <button class="btn-upload">📁 Upload Raw Data</button>
+                        <input type="file" id="dataFileInput" accept=".csv,.xlsx,.xls" onchange="handleDataUpload(event)">
+                    </div>
+                    <div class="file-status" id="dataStatus">No audit data loaded yet.</div>
+                    <button class="btn-upload" style="background:#0f587d;border-color:#0f587d;" onclick="resyncAgentEmails()">🔄 Re-sync Agent Matching</button>
+                    <div class="file-status" id="resyncStatus">Use this if agents uploaded/updated after data was already loaded, or if an agent can't see rows that should be theirs.</div>
+                </div>
             </div>
 
             <div class="filters-panel">
@@ -260,6 +264,24 @@
                         <div class="empty-note">Upload data to populate.</div>
                     </div>
                 </div>
+            </div>
+
+            <div class="chart-box">
+                <div class="chart-title">Cluster Score Distribution</div>
+                <table class="excel-table" id="clusterDistTable">
+                    <thead>
+                        <tr>
+                            <th>Cluster</th>
+                            <th>90–100%</th>
+                            <th>80–89%</th>
+                            <th>70–79%</th>
+                            <th>60–69%</th>
+                            <th>Below 60%</th>
+                            <th>Total Audits</th>
+                        </tr>
+                    </thead>
+                    <tbody><tr><td colspan="7" class="empty-note">Upload data to populate.</td></tr></tbody>
+                </table>
             </div>
         </div>
 
