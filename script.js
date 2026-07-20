@@ -829,6 +829,7 @@ function renderSupervisorDashboard(data) {
         if (!clusterRows[c]) clusterRows[c] = [];
         clusterRows[c].push(r['OVERALL SCORE']);
     });
+    console.log('Cluster Score Distribution — raw OVERALL SCORE values per cluster:', clusterRows);
     const clusterDistBody = document.getElementById('clusterDistTable').querySelector('tbody');
     const clusterNames = Object.keys(clusterRows).sort();
     clusterDistBody.innerHTML = clusterNames.length
