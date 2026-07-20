@@ -100,32 +100,6 @@
 
         <!-- ===== SUPERVISOR VIEW ===== -->
         <div class="sidebar" id="supervisorSidebar" style="display:none;">
-            <div class="sidebar-top-row">
-                <button class="upload-icon-btn" id="uploadIconBtn" onclick="toggleUploadPanel()" title="Upload / manage data">📁<span class="upload-icon-label">Data</span></button>
-            </div>
-
-            <div class="upload-popover" id="uploadPopover" style="display:none;">
-                <div class="upload-section">
-                    <h4>1. Agent Roster</h4>
-                    <div class="upload-btn-wrapper">
-                        <button class="btn-upload">📇 Upload Roster (Email/Name/ID)</button>
-                        <input type="file" id="rosterFileInput" accept=".csv,.xlsx,.xls" onchange="handleRosterUpload(event)">
-                    </div>
-                    <div class="file-status" id="rosterStatus">No roster loaded yet.</div>
-                </div>
-
-                <div class="upload-section">
-                    <h4>2. Raw Audit Data</h4>
-                    <div class="upload-btn-wrapper">
-                        <button class="btn-upload">📁 Upload Raw Data</button>
-                        <input type="file" id="dataFileInput" accept=".csv,.xlsx,.xls" onchange="handleDataUpload(event)">
-                    </div>
-                    <div class="file-status" id="dataStatus">No audit data loaded yet.</div>
-                    <button class="btn-upload" style="background:#0f587d;border-color:#0f587d;" onclick="resyncAgentEmails()">🔄 Re-sync Agent Matching</button>
-                    <div class="file-status" id="resyncStatus">Use this if agents uploaded/updated after data was already loaded, or if an agent can't see rows that should be theirs.</div>
-                </div>
-            </div>
-
             <div class="filters-panel">
                 <div class="filters-panel-head">
                     <span>🔎 Filters</span>
@@ -139,9 +113,9 @@
                     </div>
                 </div>
                 <div class="filter-field">
-                    <label>Brand</label>
+                    <label>LOB</label>
                     <div class="select-wrap">
-                        <select id="selectBrand" onchange="filterData()"><option value="ALL">(All Brands)</option></select>
+                        <select id="selectBrand" onchange="filterData()"><option value="ALL">(All LOB)</option></select>
                     </div>
                 </div>
                 <div class="filter-field">
@@ -167,6 +141,32 @@
                     <div class="select-wrap">
                         <select id="selectTeamLeader" onchange="filterData()"><option value="ALL">(All Team Leaders)</option></select>
                     </div>
+                </div>
+            </div>
+
+            <div class="sidebar-top-row">
+                <button class="upload-icon-btn" id="uploadIconBtn" onclick="toggleUploadPanel()" title="Upload / manage data">📁<span class="upload-icon-label">Data</span></button>
+            </div>
+
+            <div class="upload-popover" id="uploadPopover" style="display:none;">
+                <div class="upload-section">
+                    <h4>1. Agent Roster</h4>
+                    <div class="upload-btn-wrapper">
+                        <button class="btn-upload">📇 Upload Roster (Email/Name/ID)</button>
+                        <input type="file" id="rosterFileInput" accept=".csv,.xlsx,.xls" onchange="handleRosterUpload(event)">
+                    </div>
+                    <div class="file-status" id="rosterStatus">No roster loaded yet.</div>
+                </div>
+
+                <div class="upload-section">
+                    <h4>2. Raw Audit Data</h4>
+                    <div class="upload-btn-wrapper">
+                        <button class="btn-upload">📁 Upload Raw Data</button>
+                        <input type="file" id="dataFileInput" accept=".csv,.xlsx,.xls" onchange="handleDataUpload(event)">
+                    </div>
+                    <div class="file-status" id="dataStatus">No audit data loaded yet.</div>
+                    <button class="btn-upload" style="background:#0f587d;border-color:#0f587d;" onclick="resyncAgentEmails()">🔄 Re-sync Agent Matching</button>
+                    <div class="file-status" id="resyncStatus">Use this if agents uploaded/updated after data was already loaded, or if an agent can't see rows that should be theirs.</div>
                 </div>
             </div>
         </div>
@@ -233,14 +233,8 @@
 
             <div class="charts-row-1">
                 <div class="chart-box">
-                    <div class="chart-title">Quality Score Per Parameter</div>
-                    <div class="bar-chart-container" id="parameterChart">
-                        <div class="bar-wrapper"><div class="bar-value" id="valReliable">-</div><div class="bar" id="barReliable" style="background:#b1cfbe;height:0%;"></div><div class="bar-label">Reliable</div></div>
-                        <div class="bar-wrapper"><div class="bar-value" id="valPersonable">-</div><div class="bar" id="barPersonable" style="background:#8fa799;height:0%;"></div><div class="bar-label">Personable</div></div>
-                        <div class="bar-wrapper"><div class="bar-value" id="valFast">-</div><div class="bar" id="barFast" style="background:#005a2b;height:0%;"></div><div class="bar-label">Fast</div></div>
-                        <div class="bar-wrapper"><div class="bar-value" id="valSecure">-</div><div class="bar" id="barSecure" style="background:#226f43;height:0%;"></div><div class="bar-label">Safe &amp; Secure</div></div>
-                        <div class="bar-wrapper"><div class="bar-value" id="valOverall">-</div><div class="bar" id="barOverall" style="background:#123e25;height:0%;"></div><div class="bar-label">Overall</div></div>
-                    </div>
+                    <div class="chart-title">Score per LOB</div>
+                    <div class="bar-chart-container" id="parameterChart"></div>
                 </div>
                 <div class="chart-box">
                     <div class="chart-title">Scores Per Team Leader</div>
@@ -250,20 +244,12 @@
                 </div>
             </div>
 
-            <div class="charts-row-2">
-                <div class="chart-box" style="min-height:200px;">
-                    <div class="chart-title">Top Hit Parameters (All Agents)</div>
-                    <table class="excel-table hitlist-table" id="topHitsTable">
-                        <thead><tr><th style="width:60%;">Parameter</th><th>Category</th><th>Times Hit</th></tr></thead>
-                        <tbody><tr><td colspan="3" class="empty-note">Upload data to populate.</td></tr></tbody>
-                    </table>
-                </div>
-                <div class="chart-box" style="min-height:200px;">
-                    <div class="chart-title">Score By Cluster</div>
-                    <div class="horizontal-chart" id="clusterChart">
-                        <div class="empty-note">Upload data to populate.</div>
-                    </div>
-                </div>
+            <div class="chart-box" style="min-height:200px;">
+                <div class="chart-title">Top Hit Parameters (All Agents)</div>
+                <table class="excel-table hitlist-table" id="topHitsTable">
+                    <thead><tr><th style="width:60%;">Parameter</th><th>Category</th><th>Times Hit</th></tr></thead>
+                    <tbody><tr><td colspan="3" class="empty-note">Upload data to populate.</td></tr></tbody>
+                </table>
             </div>
 
             <div class="chart-box">
