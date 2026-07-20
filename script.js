@@ -705,7 +705,7 @@ function renderSupervisorDashboard(data) {
         document.getElementById('cmSuperstarVal').textContent = '-';
         document.getElementById('cmUnderperformerVal').textContent = '-';
         document.getElementById('leaderChart').innerHTML = '<div class="empty-note">No matching data.</div>';
-        document.getElementById('clusterChart').innerHTML = '<div class="empty-note">No matching data.</div>';
+        document.getElementById('parameterChart').innerHTML = '<div class="empty-note">No matching data.</div>';
         document.getElementById('topHitsTable').querySelector('tbody').innerHTML = '<tr><td colspan="3" class="empty-note">No matching data.</td></tr>';
         document.getElementById('clusterDistTable').querySelector('tbody').innerHTML = '<tr><td colspan="7" class="empty-note">No matching data.</td></tr>';
         return;
@@ -717,18 +717,34 @@ function renderSupervisorDashboard(data) {
         return Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
     };
 
-    const avgReliable = avg('RELIABLE'), avgPersonable = avg('PERSONABLE'), avgFast = avg('FAST'),
-          avgSecure = avg('SAFE & SECURE'), avgOverall = avg('OVERALL SCORE');
+    const avgOverall = avg('OVERALL SCORE');
 
-    const setBar = (valId, barId, val) => {
-        document.getElementById(valId).textContent = val === null ? '-' : val + '%';
-        document.getElementById(barId).style.height = (val || 0) + '%';
-    };
-    setBar('valReliable', 'barReliable', avgReliable);
-    setBar('valPersonable', 'barPersonable', avgPersonable);
-    setBar('valFast', 'barFast', avgFast);
-    setBar('valSecure', 'barSecure', avgSecure);
-    setBar('valOverall', 'barOverall', avgOverall);
+    // Score per LOB — one bar per Line of Business (the BRAND field), showing
+    // that LOB's average overall score. Dynamic because the number of LOBs
+    // in the data can vary.
+    const lobScores = {};
+    data.forEach(r => {
+        const lob = r['BRAND'] || 'Unspecified';
+        if (!lobScores[lob]) lobScores[lob] = { total: 0, count: 0 };
+        if (r['OVERALL SCORE'] !== null && r['OVERALL SCORE'] !== undefined) {
+            lobScores[lob].total += r['OVERALL SCORE'];
+            lobScores[lob].count++;
+        }
+    });
+    const lobColors = ['#123e25', '#226f43', '#005a2b', '#8fa799', '#b1cfbe'];
+    const parameterChart = document.getElementById('parameterChart');
+    const lobNames = Object.keys(lobScores).sort();
+    parameterChart.innerHTML = lobNames.length
+        ? lobNames.map((lob, i) => {
+            const s = lobScores[lob];
+            const a = s.count ? Math.round(s.total / s.count) : 0;
+            return `<div class="bar-wrapper">
+                <div class="bar-value">${a}%</div>
+                <div class="bar" style="background:${lobColors[i % lobColors.length]};height:${a}%;"></div>
+                <div class="bar-label">${escapeHtml(lob)}</div>
+            </div>`;
+        }).join('')
+        : '<div class="empty-note">No matching data.</div>';
 
     const isPassed = (r) => r['OVERALL PASSRATE'] ? r['OVERALL PASSRATE'] === 'PASSED' : (r['OVERALL SCORE'] || 0) >= 85;
     const passed = data.filter(isPassed).length;
@@ -776,22 +792,6 @@ function renderSupervisorDashboard(data) {
         return `<div class="horizontal-bar-row">
             <div class="horizontal-label" title="${tl}">${tl}</div>
             <div class="horizontal-bar-container"><div class="horizontal-bar-fill" style="width:${a}%;">${a}%</div></div>
-        </div>`;
-    }).join('') || '<div class="empty-note">No matching data.</div>';
-
-    // Cluster chart
-    const clusterScores = {};
-    data.forEach(r => {
-        const c = r['CLUSTER'] || 'Unassigned';
-        if (!clusterScores[c]) clusterScores[c] = { total: 0, count: 0 };
-        if (r['OVERALL SCORE'] !== null) { clusterScores[c].total += r['OVERALL SCORE']; clusterScores[c].count++; }
-    });
-    const clusterChart = document.getElementById('clusterChart');
-    clusterChart.innerHTML = Object.entries(clusterScores).map(([c, s]) => {
-        const a = s.count ? Math.round(s.total / s.count) : 0;
-        return `<div class="horizontal-bar-row">
-            <div class="horizontal-label" title="${c}">${c}</div>
-            <div class="horizontal-bar-container"><div class="horizontal-bar-fill" style="width:${a}%; background:#832076;">${a}%</div></div>
         </div>`;
     }).join('') || '<div class="empty-note">No matching data.</div>';
 
