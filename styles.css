@@ -44,9 +44,11 @@
         background: #fff;
         color: var(--smart-green-dark);
         font-weight: 900;
-        padding: 4px 10px;
+        padding: 5px 12px;
         border-radius: 4px;
-        font-size: 16px;
+        font-size: 13px;
+        white-space: nowrap;
+        letter-spacing: 0.2px;
     }
 
     .header-title { text-align: center; flex-grow: 1; }
@@ -219,14 +221,33 @@
         overflow-y: auto;
     }
 
-    .brand-logo-panel {
-        background-color: white;
-        border-radius: 4px;
-        padding: 10px;
-        text-align: center;
-        border: 1px solid #d9c5b2;
+    .sidebar-top-row { display: flex; justify-content: flex-end; }
+    .upload-icon-btn {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        background: white;
+        border: 1px solid #e5ddd3;
+        border-radius: 8px;
+        padding: 8px 12px;
+        font-size: 16px;
+        cursor: pointer;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+        color: var(--smart-green-dark);
+        transition: background 0.15s ease, box-shadow 0.15s ease;
     }
-    .brand-logo-panel h2 { margin: 0; color: var(--smart-green-dark); font-size: 24px; font-style: italic; }
+    .upload-icon-btn:hover { background: var(--slicer-bg); box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+    .upload-icon-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px; }
+
+    .upload-popover {
+        flex-direction: column;
+        gap: 10px;
+        background: white;
+        border: 1px solid #e5ddd3;
+        border-radius: 10px;
+        padding: 10px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+    }
 
     .filters-panel {
         background: white;
