@@ -57,6 +57,19 @@ body {
 
 .header-right { display: flex; align-items: center; gap: 14px; font-size: 12px; }
 .header-right .brand-tag { font-weight: bold; color: var(--gold); }
+.btn-switch-site {
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.4);
+    color: white;
+    padding: 5px 10px;
+    border-radius: 14px;
+    font-size: 11px;
+    font-weight: 600;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+.btn-switch-site:hover { background: rgba(255,255,255,0.15); border-color: var(--gold); }
 .session-chip {
     background: rgba(255,255,255,0.12);
     border: 1px solid rgba(255,255,255,0.3);
@@ -399,16 +412,16 @@ body {
 .excel-table th { background-color: #f2f2f2; color: #333; font-weight: bold; }
 .excel-table tr.total-row { font-weight: bold; background-color: #f2f2f2; }
 
-.charts-row-1 { display: grid; grid-template-columns: 1.8fr 1fr; gap: 12px; }
+.charts-row-1 { display: grid; grid-template-columns: 1.8fr 1fr; gap: 16px; }
 
 .chart-box {
     background-color: white;
     border: 1px solid var(--card-border);
     border-radius: 4px;
-    padding: 10px;
+    padding: 14px;
     display: flex;
     flex-direction: column;
-    min-height: 250px;
+    min-height: 380px;
     position: relative;
 }
 .chart-title {
@@ -562,10 +575,10 @@ body {
     white-space: nowrap;
 }
 
-.horizontal-chart { display: flex; flex-direction: column; gap: 10px; flex: 1; overflow-y: auto; max-height: 200px; padding-top: 5px; }
+.horizontal-chart { display: flex; flex-direction: column; gap: 12px; flex: 1; overflow-y: auto; max-height: 320px; padding-top: 5px; }
 .horizontal-bar-row { display: flex; align-items: center; font-size: 10px; }
 .horizontal-label { width: 120px; font-size: 9px; color: #444; text-align: right; padding-right: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.horizontal-bar-container { flex: 1; background-color: #f0f0f0; height: 30px; border-radius: 2px; position: relative; }
+.horizontal-bar-container { flex: 1; background-color: #f0f0f0; height: 34px; border-radius: 2px; position: relative; }
 .horizontal-bar-fill {
     background-color: #0f587d;
     height: 100%;
