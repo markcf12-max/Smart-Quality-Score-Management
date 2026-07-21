@@ -10,14 +10,14 @@ import {
     onAuthStateChanged
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 import {
-    doc, getDoc, setDoc, deleteDoc,
+    doc, getDoc, setDoc,
     collection, query, where, getDocs, writeBatch
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
-const TEAM_LEADER_INVITE_CODE = 'SMART-TL-2026'; // client-side only — fine for a prototype, replace with a Cloud Function check before real use
-const QUALITY_INVITE_CODE = 'SMART-QA-2026'; // client-side only — same caveat as above
+const TEAM_LEADER_INVITE_CODE = 'SMART-TL-2026';
+const QUALITY_INVITE_CODE = 'SMART-QA-2026';
 
-/* Firestore write batches max out at 500 ops — chunk anything bigger */
+/* Write batches max out at 500 ops — chunking by 400 */
 async function batchWriteDocs(collectionName, docs, idFn) {
     const chunks = [];
     for (let i = 0; i < docs.length; i += 400) chunks.push(docs.slice(i, i + 400));
@@ -42,13 +42,6 @@ async function clearCollection(collectionName) {
     }
 }
 
-/* Replaces the entire auditData collection using predictable IDs (row_0,
-   row_1, ...) tracked via a small metadata doc. This skips reading every
-   existing document just to find its ID before deleting it — cutting
-   Firestore operations per upload by roughly a third compared to
-   clearCollection() + batchWriteDocs(). The delete+write cost still scales
-   with row count (that's inherent to a full replace), so avoid uploading
-   repeatedly while testing — try a small trimmed sample file first. */
 async function replaceAuditData(rows) {
     const metaRef = doc(db, 'meta', 'auditData');
     const metaSnap = await getDoc(metaRef);
@@ -72,15 +65,12 @@ async function replaceAuditData(rows) {
 }
 
 /* ==========================================================================
-   SESSION
-   Firebase Auth persists the session in the browser by default, so a page
-   refresh keeps the user logged in — onAuthStateChanged fires on load.
+   SESSION & AUTH
    ========================================================================== */
-let currentSession = null; // { uid, email, role, agentName, agentId }
+let currentSession = null;
+let authFlowInProgress = false;
+const REQUIRED_EMAIL_DOMAIN = '@supplier.smart.com.ph';
 
-/* ==========================================================================
-   AUTH UI
-   ========================================================================== */
 function switchAuthTab(which) {
     document.getElementById('tabLogin').classList.toggle('active', which === 'login');
     document.getElementById('tabSignup').classList.toggle('active', which === 'signup');
@@ -106,17 +96,6 @@ function showAuthMsg(elId, text, ok) {
     el.textContent = text;
     el.className = 'auth-msg ' + (ok ? 'ok' : 'error');
 }
-
-/* Guards the auto-firing onAuthStateChanged listener from reacting while
-   handleSignup is mid-flight. Creating an account signs the user in
-   immediately, which used to fire the listener WHILE handleSignup was still
-   checking the roster and writing the profile doc — a race that caused the
-   success message to disappear, or the new agent to get logged straight
-   into a half-set-up session. Login temporarily sets this too, so it can
-   drive enterApp() itself deterministically instead of racing the listener. */
-let authFlowInProgress = false;
-
-const REQUIRED_EMAIL_DOMAIN = '@supplier.smart.com.ph';
 
 async function handleSignup() {
     const email = document.getElementById('signupEmail').value.trim().toLowerCase();
@@ -149,8 +128,7 @@ async function handleSignup() {
             return;
         }
 
-        // Agent path — account is created first (Firestore rules require being
-        // signed in to read the roster), then rolled back if there's no match.
+        // Agent path
         let cred;
         try {
             cred = await createUserWithEmailAndPassword(auth, email, pw);
@@ -177,7 +155,6 @@ async function handleSignup() {
             clearSignupForm();
             setTimeout(() => switchAuthTab('login'), 1200);
         } catch (err) {
-            // best-effort cleanup so a failed signup doesn't leave an orphaned auth account
             try { await deleteUser(cred.user); } catch (e2) {}
             showAuthMsg('signupMsg', friendlyAuthError(err), false);
         }
@@ -219,7 +196,7 @@ async function handleLogin() {
 }
 
 function logout() {
-    signOut(auth); // onAuthStateChanged below handles the UI reset
+    signOut(auth);
 }
 
 function friendlyAuthError(err) {
@@ -231,8 +208,6 @@ function friendlyAuthError(err) {
     return 'Something went wrong: ' + (err && err.message ? err.message : 'please try again.');
 }
 
-/* Resets every piece of UI/state that could otherwise leak between two
-   different people using the same browser/station one after another. */
 function resetToLoggedOutState() {
     currentSession = null;
     cachedAuditRows = [];
@@ -245,19 +220,15 @@ function resetToLoggedOutState() {
     clearSignupForm();
     switchAuthTab('login');
 
-    // clear anything the previous person's session had rendered
     document.getElementById('agentAuditList').innerHTML = '';
     document.getElementById('agentScorecard').innerHTML = '';
     document.getElementById('agentWelcomeName').textContent = 'Welcome';
     document.getElementById('rosterStatus').textContent = 'No roster loaded yet.';
     document.getElementById('dataStatus').textContent = 'No audit data loaded yet.';
-    document.getElementById('resyncStatus').textContent = 'Use this if agents uploaded/updated after data was already loaded, or if an agent can\u2019t see rows that should be theirs.';
+    document.getElementById('resyncStatus').textContent = 'Use this if agents uploaded/updated after data was already loaded, or if an agent can’t see rows that should be theirs.';
     document.getElementById('uploadPopover').style.display = 'none';
 }
 
-/* Fires on page load (if a session persisted) and after every sign-in/out —
-   except while handleSignup/handleLogin are already driving the UI
-   themselves (see authFlowInProgress above). */
 onAuthStateChanged(auth, async (user) => {
     if (authFlowInProgress) return;
 
@@ -283,7 +254,6 @@ async function enterApp() {
     const roleLabels = { quality: '👤 Quality · ', team_leader: '👤 Team Leader · ', supervisor: '👤 Quality · ', agent: '👤 Agent · ' };
     document.getElementById('sessionLabel').textContent = (roleLabels[currentSession.role] || '👤 ') + currentSession.email;
 
-    // 'supervisor' kept as a legacy alias for 'quality' (full access) in case any older accounts still have that role
     const canViewDashboard = currentSession.role === 'quality' || currentSession.role === 'team_leader' || currentSession.role === 'supervisor';
     const canUpload = currentSession.role === 'quality' || currentSession.role === 'supervisor';
 
@@ -307,17 +277,6 @@ async function enterApp() {
 
 /* ==========================================================================
    HIT-PARAMETER CONFIG
-   Maps raw audit columns to plain-language "what was flagged" descriptions.
-
-   Two column types, because the source data uses different conventions:
-   - 'descriptive' (Reliable/Personable/Fast columns): usually "No Opportunity"
-     when there's nothing to flag, but when there IS an issue the cell often
-     contains the actual reason ("No ticket created", "Vague explanation")
-     rather than a plain "Yes". Any value that isn't a known "no issue"
-     marker counts as a hit, and the real text is shown when it's more
-     specific than a bare "Yes".
-   - 'boolean' (Safe & Secure/Mistreat columns): strict Yes/No/NA convention,
-     matched against an exact hitValue.
    ========================================================================== */
 const NON_ISSUE_VALUES = new Set(['', 'NO OPPORTUNITY', 'NA', 'N/A', 'NO', 'NONE']);
 
@@ -352,10 +311,6 @@ function normVal(v) {
     return (v === undefined || v === null) ? '' : String(v).trim().toUpperCase();
 }
 
-/* Forgiving name comparison for matching roster entries to raw-data rows.
-   Strips accents/diacritics (Muñoz -> Munoz), punctuation, common suffixes
-   (Jr., Sr., II, III), and collapses extra whitespace — so small spelling
-   differences between the two files don't break the match. */
 function normalizeName(str) {
     return String(str || '')
         .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -378,9 +333,6 @@ function getRowIssues(row) {
             return;
         }
 
-        // descriptive: anything that isn't a known "no issue" marker is a hit.
-        // If the cell has real text beyond a bare "Yes", show that instead of
-        // the generic label — it's the actual reason the auditor wrote down.
         if (!NON_ISSUE_VALUES.has(v)) {
             const detail = v !== 'YES' ? String(raw).trim() : '';
             issues.push({ label: detail ? `${p.label} — ${detail}` : p.label, category: p.category });
@@ -390,7 +342,7 @@ function getRowIssues(row) {
 }
 
 /* ==========================================================================
-   FILE PARSING (SheetJS handles both CSV and XLSX)
+   FILE PARSING
    ========================================================================== */
 function parseWorkbookFile(file, preferSheetNameContains) {
     return new Promise((resolve, reject) => {
@@ -422,7 +374,6 @@ function findHeader(row, candidates) {
         const hit = keys.find(k => k.trim().toLowerCase() === cand.toLowerCase());
         if (hit) return hit;
     }
-    // fallback: partial match
     for (const cand of candidates) {
         const hit = keys.find(k => k.trim().toLowerCase().includes(cand.toLowerCase()));
         if (hit) return hit;
@@ -474,10 +425,6 @@ async function refreshRosterStatus() {
     }
 }
 
-/* Re-match every existing auditData row to the current roster, without
-   requiring a fresh raw-data upload. Fixes the common case where the
-   roster was uploaded after the raw data, or an agent's name didn't
-   match exactly at the time of upload. */
 async function resyncAgentEmails() {
     const statusEl = document.getElementById('resyncStatus');
     statusEl.textContent = 'Re-syncing...';
@@ -554,8 +501,6 @@ async function handleDataUpload(event) {
             console.log('Actual column headers in this file:', Object.keys(rows[0]));
         }
 
-        // build a name -> email lookup from the roster so each audit row can be
-        // matched back to the agent's login email (needed for the agent's own query)
         const rosterSnap = await getDocs(collection(db, 'roster'));
         const nameToEmail = {};
         rosterSnap.forEach(d => {
@@ -563,12 +508,6 @@ async function handleDataUpload(event) {
             nameToEmail[normalizeName(data.agentName)] = d.id;
         });
 
-        // Trim + normalize casing on the "dimension" columns so a stray space
-        // or inconsistent casing in the source file (e.g. "July" vs "JULY")
-        // doesn't split what's really one value into duplicate filter/group
-        // entries. FORM TYPE/MONTH/AGENT TENURE are small controlled
-        // vocabularies so they're safe to uppercase; names/brands are just
-        // trimmed so their display casing isn't changed.
         const UPPERCASE_FIELDS = ['FORM TYPE', 'MONTH', 'AGENT TENURE', 'OVERALL PASSRATE', 'CM'];
         const TRIM_ONLY_FIELDS = ['BRAND', 'LINE OF BUSINESS', 'TEAM LEADER', 'CLUSTER', 'WEEKENDING'];
 
@@ -580,7 +519,6 @@ async function handleDataUpload(event) {
             });
             UPPERCASE_FIELDS.forEach(f => { out[f] = normVal(out[f]); });
             TRIM_ONLY_FIELDS.forEach(f => { out[f] = String(out[f] || '').trim(); });
-            // normalize scores to 0-100 numbers (source is a 0-1 fraction)
             ['RELIABLE', 'PERSONABLE', 'FAST', 'SAFE & SECURE', 'OVERALL SCORE'].forEach(k => {
                 const n = parseFloat(out[k]);
                 out[k] = isNaN(n) ? null : (n <= 1 ? n * 100 : n);
@@ -589,12 +527,6 @@ async function handleDataUpload(event) {
             return out;
         }).filter(r => r['AGENT/OFFICER NAME']);
 
-        // Collapse exact duplicate rows (same audit exported more than once).
-        // Prefer the file's own unique ID column — Call ID/Case Number can
-        // legitimately repeat (a case can get multiple audits), so it's not
-        // a safe dedup key, but the leading "ID" column is one row per
-        // submission. Fall back to comparing every tracked field only if
-        // that column isn't present in this file.
         const hasIdColumn = !!headerMap['ID'];
         const seenKeys = new Set();
         const deduped = [];
@@ -608,7 +540,7 @@ async function handleDataUpload(event) {
 
         await replaceAuditData(deduped);
 
-        cachedAuditRows = deduped; // avoid an extra Firestore read — we already have the fresh data locally
+        cachedAuditRows = deduped;
         let msg = `✅ ${deduped.length} audit rows loaded${dupCount ? ` (${dupCount} exact duplicate row${dupCount === 1 ? '' : 's'} removed)` : ''}.`;
         if (missingFields.length) {
             msg += ` ⚠️ ${missingFields.length} expected column(s) weren't found in this file (so those parameters won't show as flagged) — check the browser console for the exact list.`;
@@ -643,10 +575,6 @@ function populateDropdownOptions(rows) {
     });
 }
 
-/* In-memory cache of the supervisor's audit data. Refetched only on login
-   and after an upload/resync — filtering (dropdowns) works off this copy
-   instead of re-reading the whole Firestore collection every time, which
-   is what was burning through the free-tier daily read quota. */
 let cachedAuditRows = [];
 
 async function loadAllAuditData() {
@@ -719,9 +647,6 @@ function renderSupervisorDashboard(data) {
 
     const avgOverall = avg('OVERALL SCORE');
 
-    // Score per LOB — one bar per Line of Business (the BRAND field), showing
-    // that LOB's average overall score. Dynamic because the number of LOBs
-    // in the data can vary.
     const lobScores = {};
     data.forEach(r => {
         const lob = r['BRAND'] || 'Unspecified';
@@ -767,8 +692,6 @@ function renderSupervisorDashboard(data) {
     document.getElementById('totalAvg91').textContent = bucketAvg(buckets.b3);
     document.getElementById('totalAvgTotal').textContent = avgOverall === null ? '-' : avgOverall + '%';
 
-    // CM Distribution — uses the authoritative CM column from the source
-    // data (SUPERSTAR / UNDERPERFORMER) rather than a guessed threshold.
     const cmRows = data.filter(r => r['CM']);
     if (cmRows.length) {
         const superstar = cmRows.filter(r => r['CM'] === 'SUPERSTAR').length;
@@ -779,7 +702,6 @@ function renderSupervisorDashboard(data) {
         document.getElementById('cmUnderperformerVal').textContent = '-';
     }
 
-    // Team leader chart
     const tlScores = {};
     data.forEach(r => {
         const tl = r['TEAM LEADER'] || 'Unassigned';
@@ -795,7 +717,6 @@ function renderSupervisorDashboard(data) {
         </div>`;
     }).join('') || '<div class="empty-note">No matching data.</div>';
 
-    // Top hit parameters
     const hitCounts = {};
     data.forEach(r => {
         getRowIssues(r).forEach(issue => {
@@ -812,9 +733,6 @@ function renderSupervisorDashboard(data) {
         }).join('')
         : '<tr><td colspan="3" class="empty-note">No parameters flagged in this selection.</td></tr>';
 
-    // Cluster Score Distribution — % of each cluster's audits falling into
-    // each score range, so a supervisor can see e.g. "Cluster D has 30% of
-    // its audits below 60%" at a glance rather than just an average.
     const distBuckets = [
         { label: '90–100%', test: s => s >= 90 },
         { label: '80–89%', test: s => s >= 80 && s < 90 },
@@ -829,7 +747,6 @@ function renderSupervisorDashboard(data) {
         if (!clusterRows[c]) clusterRows[c] = [];
         clusterRows[c].push(r['OVERALL SCORE']);
     });
-    console.log('Cluster Score Distribution — raw OVERALL SCORE values per cluster:', clusterRows);
     const clusterDistBody = document.getElementById('clusterDistTable').querySelector('tbody');
     const clusterNames = Object.keys(clusterRows).sort();
     clusterDistBody.innerHTML = clusterNames.length
@@ -852,7 +769,6 @@ function renderSupervisorDashboard(data) {
 async function renderAgentView() {
     document.getElementById('agentWelcomeName').textContent = 'Welcome, ' + (currentSession.agentName || currentSession.email);
 
-    // Firestore security rules restrict this query to the signed-in agent's own rows
     const q = query(collection(db, 'auditData'), where('agentEmailLower', '==', currentSession.email));
     const snap = await getDocs(q);
     const myRows = snap.docs.map(d => d.data());
@@ -884,7 +800,7 @@ async function renderAgentView() {
 
     const sorted = [...myRows].sort((a, b) => String(b['WEEKENDING'] || '').localeCompare(String(a['WEEKENDING'] || '')));
 
-const auditRowHtml = (r) => {
+    const auditRowHtml = (r) => {
         const issues = getRowIssues(r);
         const score = r['OVERALL SCORE'];
         const passed = r['OVERALL PASSRATE'] ? r['OVERALL PASSRATE'] === 'PASSED' : (score !== null && score >= 85);
@@ -910,17 +826,13 @@ const auditRowHtml = (r) => {
         </div>`;
     };
 
-    // Group by month, ordered by each group's most recent weekending —
-    // the newest month opens expanded, older months collapse under a
-    // click-to-expand header so the list doesn't turn into an endless scroll.
     const groups = {};
     sorted.forEach(r => {
         const m = normVal(r['MONTH']) || 'UNSPECIFIED';
         if (!groups[m]) groups[m] = [];
         groups[m].push(r);
     });
-    console.log('Month groups for this agent — if you see more keys than expected, check the raw MONTH values listed below each:',
-        Object.keys(groups), sorted.map(r => JSON.stringify(r['MONTH'])));
+
     const orderedMonths = Object.keys(groups).sort((a, b) => {
         const aMax = groups[a].reduce((mx, r) => String(r['WEEKENDING'] || '') > mx ? String(r['WEEKENDING'] || '') : mx, '');
         const bMax = groups[b].reduce((mx, r) => String(r['WEEKENDING'] || '') > mx ? String(r['WEEKENDING'] || '') : mx, '');
@@ -945,8 +857,6 @@ const auditRowHtml = (r) => {
 
 /* ==========================================================================
    EXPOSE TO WINDOW
-   Needed because this file is an ES module (module scope), but the HTML
-   still calls these via inline onclick/onchange attributes.
    ========================================================================== */
 window.switchAuthTab = switchAuthTab;
 window.setSignupRole = setSignupRole;
