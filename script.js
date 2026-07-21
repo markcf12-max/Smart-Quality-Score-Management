@@ -324,6 +324,37 @@ function normVal(v) {
     return (v === undefined || v === null) ? '' : String(v).trim().toUpperCase();
 }
 
+const MONTH_NUM = {
+    JAN: 1, JANUARY: 1, FEB: 2, FEBRUARY: 2, MAR: 3, MARCH: 3, APR: 4, APRIL: 4,
+    MAY: 5, JUN: 6, JUNE: 6, JUL: 7, JULY: 7, AUG: 8, AUGUST: 8,
+    SEP: 9, SEPT: 9, SEPTEMBER: 9, OCT: 10, OCTOBER: 10, NOV: 11, NOVEMBER: 11, DEC: 12, DECEMBER: 12
+};
+/* Sort key for calendar order. Recognizes a month name/abbreviation anywhere in the
+   string, plus a 4-digit year if present, so "JANUARY", "JAN-26", "January 2026" all sort
+   correctly. Values with no recognizable month fall back to the end, alphabetically. */
+function monthSortKey(monthStr) {
+    const s = normVal(monthStr);
+    const yearMatch = s.match(/(20\d{2})/);
+    const year = yearMatch ? parseInt(yearMatch[1], 10) : 0;
+    const tokens = s.split(/[^A-Z]+/).filter(Boolean);
+    let monthNum = null;
+    for (const t of tokens) {
+        if (MONTH_NUM[t]) { monthNum = MONTH_NUM[t]; break; }
+    }
+    if (monthNum === null) return [1, s]; // unrecognized -> sorted after all recognized months
+    return [0, year * 100 + monthNum, s];
+}
+function compareMonths(a, b) {
+    const ka = monthSortKey(a), kb = monthSortKey(b);
+    for (let i = 0; i < Math.max(ka.length, kb.length); i++) {
+        if (ka[i] === kb[i]) continue;
+        if (ka[i] === undefined) return -1;
+        if (kb[i] === undefined) return 1;
+        return ka[i] < kb[i] ? -1 : 1;
+    }
+    return 0;
+}
+
 function normalizeName(str) {
     return String(str || '')
         .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -573,7 +604,6 @@ function populateDropdownOptions(rows) {
     const map = {
         selectFormType: 'FORM TYPE',
         selectBrand: 'BRAND',
-        selectMonth: 'MONTH',
         selectTenure: 'AGENT TENURE',
         selectTeamLeader: 'TEAM LEADER'
     };
@@ -585,7 +615,14 @@ function populateDropdownOptions(rows) {
         if (uniques.includes(current)) sel.value = current;
     });
 
-    // Weekending, grouped under its Month via optgroups
+    // Month, in calendar order
+    const monthSel = document.getElementById('selectMonth');
+    const monthCurrent = monthSel.value;
+    const monthUniques = [...new Set(rows.map(r => r['MONTH']).filter(Boolean))].sort(compareMonths);
+    monthSel.innerHTML = `<option value="ALL">(All Months)</option>` + monthUniques.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('');
+    if (monthUniques.includes(monthCurrent)) monthSel.value = monthCurrent;
+
+    // Weekending, grouped under its Month via optgroups, months in calendar order
     const weekSel = document.getElementById('selectWeekending');
     const weekCurrent = weekSel.value;
     const monthGroups = {};
@@ -596,7 +633,7 @@ function populateDropdownOptions(rows) {
         if (!monthGroups[month]) monthGroups[month] = new Set();
         monthGroups[month].add(wk);
     });
-    const monthKeys = Object.keys(monthGroups).sort();
+    const monthKeys = Object.keys(monthGroups).sort(compareMonths);
     const optgroupsHtml = monthKeys.map(month => {
         const weeks = [...monthGroups[month]].sort();
         const optionsHtml = weeks.map(w => `<option value="${escapeHtml(w)}">${escapeHtml(w)}</option>`).join('');
