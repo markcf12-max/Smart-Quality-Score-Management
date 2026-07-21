@@ -443,18 +443,21 @@ async function handleRosterUpload(event) {
 
         if (!emailKey || !nameKey) throw new Error('missing columns');
 
-        const roster = rows
+        const allNamed = rows
             .map(r => ({
                 email: String(r[emailKey] || '').trim().toLowerCase(),
                 agentName: String(r[nameKey] || '').trim(),
                 agentId: idKey ? String(r[idKey] || '').trim() : ''
             }))
-            .filter(r => r.email && r.email.includes('@') && r.agentName);
+            .filter(r => r.email && r.agentName);
+        const roster = allNamed.filter(r => r.email.endsWith('@supplier.smart.com.ph'));
+        const skippedOtherDomain = allNamed.length - roster.length;
 
         await clearCollection('roster');
         await batchWriteDocs('roster', roster, (r) => r.email);
 
-        document.getElementById('rosterStatus').innerHTML = `✅ Roster loaded: ${roster.length} agents matched to emails.`;
+        document.getElementById('rosterStatus').innerHTML = `✅ Roster loaded: ${roster.length} agents matched to emails.` +
+            (skippedOtherDomain > 0 ? ` (${skippedOtherDomain} skipped — not on @supplier.smart.com.ph)` : '');
     } catch (err) {
         console.error(err);
         document.getElementById('rosterStatus').innerHTML =
