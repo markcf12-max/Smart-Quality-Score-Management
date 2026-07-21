@@ -10,14 +10,14 @@ import {
     onAuthStateChanged
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 import {
-    doc, getDoc, setDoc,
+    doc, getDoc, setDoc, deleteDoc,
     collection, query, where, getDocs, writeBatch
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
 const TEAM_LEADER_INVITE_CODE = 'SMART-TL-2026';
 const QUALITY_INVITE_CODE = 'SMART-QA-2026';
 
-/* Write batches max out at 500 ops — chunking by 400 */
+/* Firestore write batches max out at 500 ops — chunk anything bigger */
 async function batchWriteDocs(collectionName, docs, idFn) {
     const chunks = [];
     for (let i = 0; i < docs.length; i += 400) chunks.push(docs.slice(i, i + 400));
@@ -65,12 +65,13 @@ async function replaceAuditData(rows) {
 }
 
 /* ==========================================================================
-   SESSION & AUTH
+   SESSION
    ========================================================================== */
 let currentSession = null;
-let authFlowInProgress = false;
-const REQUIRED_EMAIL_DOMAIN = '@supplier.smart.com.ph';
 
+/* ==========================================================================
+   AUTH UI
+   ========================================================================== */
 function switchAuthTab(which) {
     document.getElementById('tabLogin').classList.toggle('active', which === 'login');
     document.getElementById('tabSignup').classList.toggle('active', which === 'signup');
@@ -96,6 +97,9 @@ function showAuthMsg(elId, text, ok) {
     el.textContent = text;
     el.className = 'auth-msg ' + (ok ? 'ok' : 'error');
 }
+
+let authFlowInProgress = false;
+const REQUIRED_EMAIL_DOMAIN = '@supplier.smart.com.ph';
 
 async function handleSignup() {
     const email = document.getElementById('signupEmail').value.trim().toLowerCase();
@@ -128,7 +132,6 @@ async function handleSignup() {
             return;
         }
 
-        // Agent path
         let cred;
         try {
             cred = await createUserWithEmailAndPassword(auth, email, pw);
@@ -225,7 +228,7 @@ function resetToLoggedOutState() {
     document.getElementById('agentWelcomeName').textContent = 'Welcome';
     document.getElementById('rosterStatus').textContent = 'No roster loaded yet.';
     document.getElementById('dataStatus').textContent = 'No audit data loaded yet.';
-    document.getElementById('resyncStatus').textContent = 'Use this if agents uploaded/updated after data was already loaded, or if an agent can’t see rows that should be theirs.';
+    document.getElementById('resyncStatus').textContent = 'Use this if agents uploaded/updated after data was already loaded, or if an agent can\u2019t see rows that should be theirs.';
     document.getElementById('uploadPopover').style.display = 'none';
 }
 
@@ -382,7 +385,7 @@ function findHeader(row, candidates) {
 }
 
 /* ==========================================================================
-   ROSTER UPLOAD (Supervisor)
+   ROSTER UPLOAD
    ========================================================================== */
 async function handleRosterUpload(event) {
     const file = event.target.files[0];
@@ -460,7 +463,7 @@ async function resyncAgentEmails() {
         if (unmatchedNames.size) {
             const list = [...unmatchedNames];
             msg += ` First few: ${list.slice(0, 6).join(' | ')}${list.length > 6 ? ' …' : ''} — full list logged to console.`;
-            console.warn('Unmatched agent names (not found on the roster, or spelled differently there):', list);
+            console.warn('Unmatched agent names:', list);
         }
         statusEl.textContent = msg;
     } catch (err) {
@@ -470,7 +473,7 @@ async function resyncAgentEmails() {
 }
 
 /* ==========================================================================
-   RAW AUDIT DATA UPLOAD (Supervisor)
+   RAW AUDIT DATA UPLOAD
    ========================================================================== */
 const NEEDED_FIELDS = [
     'ID', 'FORM TYPE', 'BRAND', 'LINE OF BUSINESS', 'AGENT/OFFICER NAME', 'AGENT TENURE',
@@ -498,7 +501,6 @@ async function handleDataUpload(event) {
         const missingFields = NEEDED_FIELDS.filter(f => !headerMap[f]);
         if (missingFields.length) {
             console.warn('Columns not found in uploaded file:', missingFields);
-            console.log('Actual column headers in this file:', Object.keys(rows[0]));
         }
 
         const rosterSnap = await getDocs(collection(db, 'roster'));
@@ -543,14 +545,14 @@ async function handleDataUpload(event) {
         cachedAuditRows = deduped;
         let msg = `✅ ${deduped.length} audit rows loaded${dupCount ? ` (${dupCount} exact duplicate row${dupCount === 1 ? '' : 's'} removed)` : ''}.`;
         if (missingFields.length) {
-            msg += ` ⚠️ ${missingFields.length} expected column(s) weren't found in this file (so those parameters won't show as flagged) — check the browser console for the exact list.`;
+            msg += ` ⚠️ ${missingFields.length} expected column(s) missing — check console for details.`;
         }
         document.getElementById('dataStatus').innerHTML = msg;
         populateDropdownOptions(trimmed);
         filterData();
     } catch (err) {
         console.error(err);
-        document.getElementById('dataStatus').innerHTML = `⚠️ Could not read this file. Check that it contains the expected audit columns.`;
+        document.getElementById('dataStatus').innerHTML = `⚠️ Could not read this file. Check that it contains expected columns.`;
     }
 }
 
@@ -635,7 +637,6 @@ function renderSupervisorDashboard(data) {
         document.getElementById('leaderChart').innerHTML = '<div class="empty-note">No matching data.</div>';
         document.getElementById('parameterChart').innerHTML = '<div class="empty-note">No matching data.</div>';
         document.getElementById('topHitsTable').querySelector('tbody').innerHTML = '<tr><td colspan="3" class="empty-note">No matching data.</td></tr>';
-        document.getElementById('clusterDistTable').querySelector('tbody').innerHTML = '<tr><td colspan="7" class="empty-note">No matching data.</td></tr>';
         return;
     }
 
@@ -647,29 +648,64 @@ function renderSupervisorDashboard(data) {
 
     const avgOverall = avg('OVERALL SCORE');
 
-    const lobScores = {};
+    /* ==========================================================================
+       GROUPED BAR CHART (Reliable, Personable, Fast, Safe & Secure, Overall Score)
+       ========================================================================== */
+    const categories = [
+        { key: 'RELIABLE', label: 'Reliable', color: '#b2d8be' },
+        { key: 'PERSONABLE', label: 'Personable', color: '#6fb88a' },
+        { key: 'FAST', label: 'Fast', color: '#28884d' },
+        { key: 'SAFE & SECURE', label: 'Safe & Secure', color: '#0f6130' },
+        { key: 'OVERALL SCORE', label: 'Overall Score', color: '#063b1b' }
+    ];
+
+    const lobData = {};
     data.forEach(r => {
         const lob = r['BRAND'] || 'Unspecified';
-        if (!lobScores[lob]) lobScores[lob] = { total: 0, count: 0 };
-        if (r['OVERALL SCORE'] !== null && r['OVERALL SCORE'] !== undefined) {
-            lobScores[lob].total += r['OVERALL SCORE'];
-            lobScores[lob].count++;
+        if (!lobData[lob]) {
+            lobData[lob] = { RELIABLE: [], PERSONABLE: [], FAST: [], 'SAFE & SECURE': [], 'OVERALL SCORE': [] };
         }
+        categories.forEach(c => {
+            const val = r[c.key];
+            if (val !== null && val !== undefined && !isNaN(val)) {
+                lobData[lob][c.key].push(val);
+            }
+        });
     });
-    const lobColors = ['#123e25', '#226f43', '#005a2b', '#8fa799', '#b1cfbe'];
+
+    const lobNames = Object.keys(lobData).sort();
     const parameterChart = document.getElementById('parameterChart');
-    const lobNames = Object.keys(lobScores).sort();
-    parameterChart.innerHTML = lobNames.length
-        ? lobNames.map((lob, i) => {
-            const s = lobScores[lob];
-            const a = s.count ? Math.round(s.total / s.count) : 0;
-            return `<div class="bar-wrapper">
-                <div class="bar-value">${a}%</div>
-                <div class="bar" style="background:${lobColors[i % lobColors.length]};height:${a}%;"></div>
-                <div class="bar-label">${escapeHtml(lob)}</div>
+
+    if (lobNames.length) {
+        const legendHtml = `<div class="chart-legend">
+            ${categories.map(c => `
+                <div class="legend-item">
+                    <span class="legend-color" style="background:${c.color};"></span>
+                    <span>${c.label}</span>
+                </div>
+            `).join('')}
+        </div>`;
+
+        const groupsHtml = lobNames.map(lob => {
+            const barsHtml = categories.map(c => {
+                const arr = lobData[lob][c.key];
+                const score = arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : 0;
+                return `<div class="bar-wrapper" title="${c.label}: ${score}%">
+                    <div class="bar-value">${score}%</div>
+                    <div class="bar" style="background:${c.color}; height:${score}%;"></div>
+                </div>`;
+            }).join('');
+
+            return `<div class="bar-group-wrapper">
+                <div class="bar-group">${barsHtml}</div>
+                <div class="bar-group-label" title="${escapeHtml(lob)}">${escapeHtml(lob)}</div>
             </div>`;
-        }).join('')
-        : '<div class="empty-note">No matching data.</div>';
+        }).join('');
+
+        parameterChart.innerHTML = legendHtml + `<div class="grouped-chart-container">${groupsHtml}</div>`;
+    } else {
+        parameterChart.innerHTML = '<div class="empty-note">No matching data.</div>';
+    }
 
     const isPassed = (r) => r['OVERALL PASSRATE'] ? r['OVERALL PASSRATE'] === 'PASSED' : (r['OVERALL SCORE'] || 0) >= 85;
     const passed = data.filter(isPassed).length;
@@ -692,6 +728,7 @@ function renderSupervisorDashboard(data) {
     document.getElementById('totalAvg91').textContent = bucketAvg(buckets.b3);
     document.getElementById('totalAvgTotal').textContent = avgOverall === null ? '-' : avgOverall + '%';
 
+    // CM Distribution
     const cmRows = data.filter(r => r['CM']);
     if (cmRows.length) {
         const superstar = cmRows.filter(r => r['CM'] === 'SUPERSTAR').length;
@@ -702,6 +739,7 @@ function renderSupervisorDashboard(data) {
         document.getElementById('cmUnderperformerVal').textContent = '-';
     }
 
+    // Team leader chart
     const tlScores = {};
     data.forEach(r => {
         const tl = r['TEAM LEADER'] || 'Unassigned';
@@ -717,6 +755,7 @@ function renderSupervisorDashboard(data) {
         </div>`;
     }).join('') || '<div class="empty-note">No matching data.</div>';
 
+    // Top hit parameters
     const hitCounts = {};
     data.forEach(r => {
         getRowIssues(r).forEach(issue => {
@@ -732,35 +771,6 @@ function renderSupervisorDashboard(data) {
             return `<tr><td style="text-align:left;">${label}</td><td>${category}</td><td>${count}</td></tr>`;
         }).join('')
         : '<tr><td colspan="3" class="empty-note">No parameters flagged in this selection.</td></tr>';
-
-    const distBuckets = [
-        { label: '90–100%', test: s => s >= 90 },
-        { label: '80–89%', test: s => s >= 80 && s < 90 },
-        { label: '70–79%', test: s => s >= 70 && s < 80 },
-        { label: '60–69%', test: s => s >= 60 && s < 70 },
-        { label: 'Below 60%', test: s => s < 60 }
-    ];
-    const clusterRows = {};
-    data.forEach(r => {
-        const c = r['CLUSTER'] || 'Unassigned';
-        if (r['OVERALL SCORE'] === null || r['OVERALL SCORE'] === undefined) return;
-        if (!clusterRows[c]) clusterRows[c] = [];
-        clusterRows[c].push(r['OVERALL SCORE']);
-    });
-    const clusterDistBody = document.getElementById('clusterDistTable').querySelector('tbody');
-    const clusterNames = Object.keys(clusterRows).sort();
-    clusterDistBody.innerHTML = clusterNames.length
-        ? clusterNames.map(c => {
-            const scores = clusterRows[c];
-            const total = scores.length;
-            const pctCells = distBuckets.map(b => {
-                const count = scores.filter(b.test).length;
-                const pct = total ? Math.round((count / total) * 100) : 0;
-                return `<td>${pct}%</td>`;
-            }).join('');
-            return `<tr><td style="font-weight:bold;">${c}</td>${pctCells}<td>${total}</td></tr>`;
-        }).join('')
-        : '<tr><td colspan="7" class="empty-note">No matching data.</td></tr>';
 }
 
 /* ==========================================================================
