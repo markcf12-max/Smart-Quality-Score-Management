@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SMART Quality Score and Cluster Management Dashboard</title>
+<title>SMART Quality Score Management Dashboard</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <link rel="stylesheet" href="styles.css">
 <script type="module" src="script.js"></script>
@@ -16,7 +16,7 @@
         <span class="header-logo">SMART Quality Management</span>
     </div>
     <div class="header-title">
-        <h1>SMART Quality Score and Cluster Management</h1>
+        <h1>SMART Quality Score Management</h1>
         <p>GENUINE CARE AUDIT FORM</p>
     </div>
     <div class="header-right">
@@ -88,7 +88,7 @@
             <div class="auth-msg" id="signupMsg"></div>
 
             <div class="auth-hint">
-                <strong>Prototype note:</strong> this demo uses in-app storage rather than a secure backend, so treat all data here as non-production. Agent sign-up only succeeds if your email already appears on the roster a supervisor uploaded. Default supervisor invite code: <code>SMART-TL-2026</code> / <code>SMART-QA-2026</code>.
+                <strong>Prototype note:</strong> this demo uses in-app storage rather than a secure backend, so treat all data here as non-production. Agent sign-up only succeeds if your email already appears on the roster a supervisor uploaded. Default supervisor invite code: <code>SMART-ADMIN-2026</code> — change this in code before real use.
             </div>
         </div>
     </div>
@@ -233,8 +233,8 @@
 
             <div class="charts-row-1">
                 <div class="chart-box">
-                    <div class="chart-title">Score per LOB</div>
-                    <div class="bar-chart-container" id="parameterChart"></div>
+                    <div class="chart-title">Performance Overview per LOB</div>
+                    <div id="parameterChart" style="display: flex; flex-direction: column; height: 100%;"></div>
                 </div>
                 <div class="chart-box">
                     <div class="chart-title">Scores Per Team Leader</div>
@@ -249,24 +249,6 @@
                 <table class="excel-table hitlist-table" id="topHitsTable">
                     <thead><tr><th style="width:60%;">Parameter</th><th>Category</th><th>Times Hit</th></tr></thead>
                     <tbody><tr><td colspan="3" class="empty-note">Upload data to populate.</td></tr></tbody>
-                </table>
-            </div>
-
-            <div class="chart-box">
-                <div class="chart-title">Cluster Score Distribution</div>
-                <table class="excel-table" id="clusterDistTable">
-                    <thead>
-                        <tr>
-                            <th>Cluster</th>
-                            <th>90–100%</th>
-                            <th>80–89%</th>
-                            <th>70–79%</th>
-                            <th>60–69%</th>
-                            <th>Below 60%</th>
-                            <th>Total Audits</th>
-                        </tr>
-                    </thead>
-                    <tbody><tr><td colspan="7" class="empty-note">Upload data to populate.</td></tr></tbody>
                 </table>
             </div>
         </div>
