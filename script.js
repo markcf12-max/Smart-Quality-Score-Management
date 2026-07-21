@@ -262,7 +262,9 @@ async function enterApp() {
     document.getElementById('sessionChip').style.display = 'flex';
 
     const roleLabels = { quality: '👤 Quality · ', team_leader: '👤 Team Leader · ', supervisor: '👤 Quality · ', agent: '👤 Agent · ' };
-    document.getElementById('sessionLabel').textContent = (roleLabels[currentSession.role] || '👤 ') + currentSession.email;
+    const SUPERVISOR_EMAILS = new Set(['t-jtagores@pldt.com.ph']);
+    const roleLabel = SUPERVISOR_EMAILS.has(currentSession.email) ? '👤 Quality Supervisor · ' : (roleLabels[currentSession.role] || '👤 ');
+    document.getElementById('sessionLabel').textContent = roleLabel + currentSession.email;
 
     const canViewDashboard = currentSession.role === 'quality' || currentSession.role === 'team_leader' || currentSession.role === 'supervisor';
     const canUpload = currentSession.role === 'quality' || currentSession.role === 'supervisor';
@@ -572,7 +574,6 @@ function populateDropdownOptions(rows) {
         selectFormType: 'FORM TYPE',
         selectBrand: 'BRAND',
         selectMonth: 'MONTH',
-        selectWeekending: 'WEEKENDING',
         selectTenure: 'AGENT TENURE',
         selectTeamLeader: 'TEAM LEADER'
     };
@@ -583,6 +584,27 @@ function populateDropdownOptions(rows) {
         sel.innerHTML = `<option value="ALL">(All)</option>` + uniques.map(v => `<option value="${v}">${v}</option>`).join('');
         if (uniques.includes(current)) sel.value = current;
     });
+
+    // Weekending, grouped under its Month via optgroups
+    const weekSel = document.getElementById('selectWeekending');
+    const weekCurrent = weekSel.value;
+    const monthGroups = {};
+    rows.forEach(r => {
+        const wk = r['WEEKENDING'];
+        if (!wk) return;
+        const month = r['MONTH'] || 'Unspecified';
+        if (!monthGroups[month]) monthGroups[month] = new Set();
+        monthGroups[month].add(wk);
+    });
+    const monthKeys = Object.keys(monthGroups).sort();
+    const optgroupsHtml = monthKeys.map(month => {
+        const weeks = [...monthGroups[month]].sort();
+        const optionsHtml = weeks.map(w => `<option value="${escapeHtml(w)}">${escapeHtml(w)}</option>`).join('');
+        return `<optgroup label="${escapeHtml(month)}">${optionsHtml}</optgroup>`;
+    }).join('');
+    weekSel.innerHTML = `<option value="ALL">(All Weekending)</option>` + optgroupsHtml;
+    const allWeeks = [...new Set(rows.map(r => r['WEEKENDING']).filter(Boolean))];
+    if (allWeeks.includes(weekCurrent)) weekSel.value = weekCurrent;
 }
 
 let cachedAuditRows = [];
