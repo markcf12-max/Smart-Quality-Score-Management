@@ -690,7 +690,14 @@ function renderSupervisorDashboard(data) {
             const barsHtml = categories.map(c => {
                 const arr = lobData[lob][c.key];
                 const score = arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : 0;
-                return `<div class="bar-wrapper" title="${c.label}: ${score}%">
+                return `<div class="bar-wrapper">
+                    <div class="bar-tooltip">
+                        <div class="bar-tooltip-title">${escapeHtml(lob)}</div>
+                        <div class="bar-tooltip-content">
+                            <span class="bar-tooltip-badge" style="background:${c.color};"></span>
+                            <span>${c.label}: ${score}%</span>
+                        </div>
+                    </div>
                     <div class="bar-value">${score}%</div>
                     <div class="bar" style="background:${c.color}; height:${score}%;"></div>
                 </div>`;
