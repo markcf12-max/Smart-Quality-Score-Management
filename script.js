@@ -101,13 +101,19 @@ function showAuthMsg(elId, text, ok) {
 let authFlowInProgress = false;
 const REQUIRED_EMAIL_DOMAIN = '@supplier.smart.com.ph';
 
+/* Specific non-standard emails allowed to bypass the domain check
+   (e.g. a Quality supervisor whose real work email is on a different domain) */
+const EMAIL_DOMAIN_EXCEPTIONS = new Set([
+    't-jtagores@pldt.com.ph'
+]);
+
 async function handleSignup() {
     const email = document.getElementById('signupEmail').value.trim().toLowerCase();
     const pw = document.getElementById('signupPassword').value;
     const pw2 = document.getElementById('signupPassword2').value;
 
     if (!email || !email.includes('@')) return showAuthMsg('signupMsg', 'Enter a valid work email.', false);
-    if (!email.endsWith(REQUIRED_EMAIL_DOMAIN)) return showAuthMsg('signupMsg', `Please sign up using your ${REQUIRED_EMAIL_DOMAIN} work email.`, false);
+    if (!email.endsWith(REQUIRED_EMAIL_DOMAIN) && !EMAIL_DOMAIN_EXCEPTIONS.has(email)) return showAuthMsg('signupMsg', `Please sign up using your ${REQUIRED_EMAIL_DOMAIN} work email.`, false);
     if (pw.length < 6) return showAuthMsg('signupMsg', 'Password must be at least 6 characters.', false);
     if (pw !== pw2) return showAuthMsg('signupMsg', 'Passwords do not match.', false);
 
