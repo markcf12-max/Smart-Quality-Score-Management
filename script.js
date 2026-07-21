@@ -223,6 +223,7 @@ function resetToLoggedOutState() {
     document.getElementById('appScreen').style.display = 'none';
     document.getElementById('authScreen').style.display = 'flex';
     document.getElementById('sessionChip').style.display = 'none';
+    document.getElementById('switchSiteBtn').style.display = 'none';
     document.getElementById('loginEmail').value = '';
     document.getElementById('loginPassword').value = '';
     document.getElementById('loginMsg').className = 'auth-msg';
@@ -270,6 +271,7 @@ async function enterApp() {
     document.getElementById('supervisorView').style.display = canViewDashboard ? 'flex' : 'none';
     document.getElementById('agentView').style.display = canViewDashboard ? 'none' : 'flex';
     document.getElementById('uploadIconBtn').style.display = canUpload ? 'flex' : 'none';
+    document.getElementById('switchSiteBtn').style.display = canUpload ? 'inline-flex' : 'none';
 
     if (canViewDashboard) {
         if (canUpload) await refreshRosterStatus();
