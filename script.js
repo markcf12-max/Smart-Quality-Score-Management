@@ -434,12 +434,12 @@ async function handleRosterUpload(event) {
     document.getElementById('rosterStatus').textContent = 'Processing ' + file.name + '...';
 
     try {
-        const rows = await parseWorkbookFile(file);
+        const rows = await parseWorkbookFile(file, 'ROSTER');
         if (!rows.length) throw new Error('empty');
 
-        const emailKey = findHeader(rows[0], ['Email', 'Work Email']);
-        const nameKey = findHeader(rows[0], ['Agent Name', 'AGENT/OFFICER NAME', 'Name']);
-        const idKey = findHeader(rows[0], ['ID', 'Employee ID', 'EE number/ID number', 'Agent ID']);
+        const emailKey = findHeader(rows[0], ['Email', 'Work Email', 'PLDT/SMART Domain v2', 'PLDT/SMART Domain']);
+        const nameKey = findHeader(rows[0], ['Agent Name', 'AGENT/OFFICER NAME', 'Employee Name', 'Name']);
+        const idKey = findHeader(rows[0], ['ID', 'Employee ID', 'EE number/ID number', 'Agent ID', 'Win ID']);
 
         if (!emailKey || !nameKey) throw new Error('missing columns');
 
@@ -449,7 +449,7 @@ async function handleRosterUpload(event) {
                 agentName: String(r[nameKey] || '').trim(),
                 agentId: idKey ? String(r[idKey] || '').trim() : ''
             }))
-            .filter(r => r.email && r.agentName);
+            .filter(r => r.email && r.email.includes('@') && r.agentName);
 
         await clearCollection('roster');
         await batchWriteDocs('roster', roster, (r) => r.email);
