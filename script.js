@@ -224,6 +224,7 @@ function resetToLoggedOutState() {
     document.getElementById('authScreen').style.display = 'flex';
     document.getElementById('sessionChip').style.display = 'none';
     document.getElementById('switchSiteBtn').style.display = 'none';
+    document.getElementById('myTeamCard').style.display = 'none';
     document.getElementById('loginEmail').value = '';
     document.getElementById('loginPassword').value = '';
     document.getElementById('loginMsg').className = 'auth-msg';
@@ -285,6 +286,8 @@ async function enterApp() {
         }
         if (currentSession.role === 'team_leader') {
             await renderMyTeamPanel(rows);
+        } else {
+            document.getElementById('myTeamCard').style.display = 'none';
         }
     } else {
         await renderAgentView();
@@ -301,18 +304,40 @@ async function renderMyTeamPanel(rows) {
             return;
         }
         const myKey = normalizeName(myName);
-        const counts = {};
+        const byAgent = {};
         rows.forEach(r => {
             if (normalizeName(r['TEAM LEADER']) !== myKey) return;
             const name = String(r['AGENT/OFFICER NAME'] || '').trim();
             if (!name) return;
-            counts[name] = (counts[name] || 0) + 1;
+            if (!byAgent[name]) byAgent[name] = { RELIABLE: [], PERSONABLE: [], FAST: [], 'SAFE & SECURE': [], 'OVERALL SCORE': [], count: 0 };
+            byAgent[name].count++;
+            ['RELIABLE', 'PERSONABLE', 'FAST', 'SAFE & SECURE', 'OVERALL SCORE'].forEach(k => {
+                const v = r[k];
+                if (v !== null && v !== undefined && !isNaN(v)) byAgent[name][k].push(v);
+            });
         });
-        const names = Object.keys(counts).sort();
+
+        const names = Object.keys(byAgent).sort();
         document.getElementById('myTeamTitle').textContent = `My Team — ${myName} (${names.length} agent${names.length === 1 ? '' : 's'})`;
-        document.getElementById('myTeamList').innerHTML = names.length
-            ? names.map(n => `<span class="my-team-chip">${escapeHtml(n)}<span class="count">${counts[n]}</span></span>`).join('')
-            : '<span class="empty-note">No audits found yet for agents under you.</span>';
+
+        const avgOf = (arr) => arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : null;
+        const cell = (v) => v === null ? '—' : v + '%';
+
+        const tbody = document.getElementById('myTeamTableBody');
+        tbody.innerHTML = names.length
+            ? names.map(n => {
+                const a = byAgent[n];
+                return `<tr>
+                    <td style="text-align:left;">${escapeHtml(n)}</td>
+                    <td>${cell(avgOf(a.RELIABLE))}</td>
+                    <td>${cell(avgOf(a.PERSONABLE))}</td>
+                    <td>${cell(avgOf(a.FAST))}</td>
+                    <td>${cell(avgOf(a['SAFE & SECURE']))}</td>
+                    <td>${cell(avgOf(a['OVERALL SCORE']))}</td>
+                    <td>${a.count}</td>
+                </tr>`;
+            }).join('')
+            : `<tr><td colspan="7" class="empty-note">No audits found yet for agents under you.</td></tr>`;
         card.style.display = 'block';
     } catch (err) {
         console.error('My Team panel error:', err);
@@ -949,7 +974,7 @@ async function renderAgentView() {
                 <span>${escapeHtml(r['WEEKENDING'])} · ${escapeHtml(r['FORM TYPE'])} · ${escapeHtml(r['BRAND'])}</span>
                 <span class="score-pill ${passed ? 'pass-pill' : 'fail-pill'}">${score === null ? '-' : score + '%'}</span>
             </div>
-            <div class="audit-meta">Team Leader: ${escapeHtml(r['TEAM LEADER']) || '—'} · Cluster: ${escapeHtml(r['CLUSTER']) || '—'} · Month: ${escapeHtml(r['MONTH']) || '—'}${r['CALL ID / CASE NUMBER'] ? ` · Case #: ${escapeHtml(r['CALL ID / CASE NUMBER'])}` : ''}</div>
+            <div class="audit-meta">Team Leader: ${escapeHtml(r['TEAM LEADER']) || '—'} · Cluster: ${escapeHtml(r['CLUSTER']) || '—'} · Month: ${escapeHtml(r['MONTH']) || '—'}${r['CALL ID / CASE NUMBER'] ? ` · ${normVal(r['BRAND']) === 'SMART EBG' ? 'Call ID' : 'Case #'}: ${escapeHtml(r['CALL ID / CASE NUMBER'])}` : ''}</div>
             <div>${tagsHtml}</div>
             ${commentsHtml}
         </div>`;
