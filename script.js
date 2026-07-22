@@ -362,7 +362,11 @@ function normalizeName(str) {
         .replace(/[.,'-]/g, ' ')
         .replace(/\b(JR|SR|II|III|IV)\b/g, '')
         .replace(/\s+/g, ' ')
-        .trim();
+        .trim()
+        .split(' ')
+        .filter(Boolean)
+        .sort()
+        .join(' ');
 }
 
 function getRowIssues(row) {
