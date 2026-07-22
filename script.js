@@ -283,8 +283,40 @@ async function enterApp() {
             populateDropdownOptions(rows);
             filterData();
         }
+        if (currentSession.role === 'team_leader') {
+            await renderMyTeamPanel(rows);
+        }
     } else {
         await renderAgentView();
+    }
+}
+
+async function renderMyTeamPanel(rows) {
+    const card = document.getElementById('myTeamCard');
+    try {
+        const rosterSnap = await getDoc(doc(db, 'roster', currentSession.email));
+        const myName = rosterSnap.exists() ? rosterSnap.data().agentName : '';
+        if (!myName) {
+            card.style.display = 'none';
+            return;
+        }
+        const myKey = normalizeName(myName);
+        const counts = {};
+        rows.forEach(r => {
+            if (normalizeName(r['TEAM LEADER']) !== myKey) return;
+            const name = String(r['AGENT/OFFICER NAME'] || '').trim();
+            if (!name) return;
+            counts[name] = (counts[name] || 0) + 1;
+        });
+        const names = Object.keys(counts).sort();
+        document.getElementById('myTeamTitle').textContent = `My Team — ${myName} (${names.length} agent${names.length === 1 ? '' : 's'})`;
+        document.getElementById('myTeamList').innerHTML = names.length
+            ? names.map(n => `<span class="my-team-chip">${escapeHtml(n)}<span class="count">${counts[n]}</span></span>`).join('')
+            : '<span class="empty-note">No audits found yet for agents under you.</span>';
+        card.style.display = 'block';
+    } catch (err) {
+        console.error('My Team panel error:', err);
+        card.style.display = 'none';
     }
 }
 
