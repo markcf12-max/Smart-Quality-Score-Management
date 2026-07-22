@@ -232,11 +232,6 @@
                 </div>
             </div>
 
-            <div class="card-table my-team-card" id="myTeamCard" style="display:none;">
-                <h3 id="myTeamTitle">My Team</h3>
-                <div id="myTeamList" class="my-team-list"></div>
-            </div>
-
             <div class="charts-row-1">
                 <div class="chart-box">
                     <div class="chart-title">SCORE PER LOB</div>
@@ -255,6 +250,22 @@
                 <table class="excel-table hitlist-table" id="topHitsTable">
                     <thead><tr><th style="width:60%;">Parameter</th><th>Category</th><th>Times Hit</th></tr></thead>
                     <tbody><tr><td colspan="3" class="empty-note">Upload data to populate.</td></tr></tbody>
+                </table>
+            </div>
+
+            <div class="chart-box my-team-card" id="myTeamCard" style="display:none; min-height:0;">
+                <div class="chart-title" id="myTeamTitle">My Team</div>
+                <table class="excel-table" id="myTeamTable">
+                    <thead><tr>
+                        <th style="text-align:left;">Agent</th>
+                        <th>Reliable</th>
+                        <th>Personable</th>
+                        <th>Fast</th>
+                        <th>Safe &amp; Secure</th>
+                        <th>Overall</th>
+                        <th>Audits</th>
+                    </tr></thead>
+                    <tbody id="myTeamTableBody"></tbody>
                 </table>
             </div>
         </div>
