@@ -505,11 +505,11 @@ async function resyncAgentEmails() {
 
         let msg = `✅ Re-synced: ${matched} rows matched to a roster email, ${unmatched} rows still unmatched (${unmatchedNames.size} distinct agent name(s)).`;
         if (unmatchedNames.size) {
-            const list = [...unmatchedNames];
-            msg += ` First few: ${list.slice(0, 6).join(' | ')}${list.length > 6 ? ' …' : ''} — full list logged to console.`;
-            console.warn('Unmatched agent names:', list);
+            const list = [...unmatchedNames].sort();
+            msg += `<details style="margin-top:6px;"><summary style="cursor:pointer;">Show unmatched names (${list.length})</summary>` +
+                `<div style="max-height:160px;overflow-y:auto;margin-top:4px;font-size:11px;line-height:1.6;">${list.map(n => escapeHtml(n)).join('<br>')}</div></details>`;
         }
-        statusEl.textContent = msg;
+        statusEl.innerHTML = msg;
     } catch (err) {
         console.error(err);
         statusEl.textContent = '⚠️ Re-sync failed: ' + (err && err.message ? err.message : 'unknown error');
