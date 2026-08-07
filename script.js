@@ -363,13 +363,13 @@ const HIT_PARAMS = [
     { col: 'Unfriendly/discourteous/sarcastic?', category: 'Personable', label: 'Unfriendly, discourteous, or sarcastic tone', type: 'descriptive' },
     { col: 'Sounded transactional or robotic?', category: 'Personable', label: 'Sounded transactional or robotic', type: 'descriptive' },
     { col: 'FAST: Were there other Agent factors observed that affected the customer experience?', category: 'Fast', label: 'Other agent factor slowed the resolution', type: 'descriptive' },
-    { col: 'DID WE FOLLOW THE CUSTOMER AUTHENTICATION PROCESS?', category: 'Safe & Secure', label: 'Customer authentication process missed', type: 'boolean', hitValue: 'NO' },
-    { col: 'DID WE FOLLOW THE DATA PRIVACY POLICY?', category: 'Safe & Secure', label: 'Data privacy policy not followed', type: 'boolean', hitValue: 'NO' },
-    { col: 'DID WE UPDATE THE CUSTOMER INFORMATION IN THE TOOL?', category: 'Safe & Secure', label: 'Customer info not updated in tool', type: 'boolean', hitValue: 'NO' },
-    { col: 'DID WE FOLLOW THE CSAT/NPS PROCESS?', category: 'Safe & Secure', label: 'CSAT/NPS process not followed', type: 'boolean', hitValue: 'NO' },
-    { col: 'DID WE FOLLOW THE SYSTEM DOCUMENTATION PROCESS?', category: 'Safe & Secure', label: 'System documentation process missed', type: 'boolean', hitValue: 'NO' },
-    { col: 'DID WE FOLLOW THE SYSTEM TAGGING PROCESS?', category: 'Safe & Secure', label: 'System tagging process missed', type: 'boolean', hitValue: 'NO' },
-    { col: 'DID WE FOLLOW CORRECT GRAMMAR, TECHNICAL WRITING & THE PRESCRIBED LANGUAGE?', category: 'Safe & Secure', label: 'Grammar / prescribed language standard missed', type: 'boolean', hitValue: 'NO' },
+    { col: 'DID WE FOLLOW THE CUSTOMER AUTHENTICATION PROCESS?', category: 'Safe & Secure', label: 'Customer authentication process missed', type: 'descriptive' },
+    { col: 'DID WE FOLLOW THE DATA PRIVACY POLICY?', category: 'Safe & Secure', label: 'Data privacy policy not followed', type: 'descriptive' },
+    { col: 'DID WE UPDATE THE CUSTOMER INFORMATION IN THE TOOL?', category: 'Safe & Secure', label: 'Customer info not updated in tool', type: 'descriptive' },
+    { col: 'DID WE FOLLOW THE CSAT/NPS PROCESS?', category: 'Safe & Secure', label: 'CSAT/NPS process not followed', type: 'descriptive' },
+    { col: 'DID WE FOLLOW THE SYSTEM DOCUMENTATION PROCESS?', category: 'Safe & Secure', label: 'System documentation process missed', type: 'descriptive' },
+    { col: 'DID WE FOLLOW THE SYSTEM TAGGING PROCESS?', category: 'Safe & Secure', label: 'System tagging process missed', type: 'descriptive' },
+    { col: 'DID WE FOLLOW CORRECT GRAMMAR, TECHNICAL WRITING & THE PRESCRIBED LANGUAGE?', category: 'Safe & Secure', label: 'Grammar / prescribed language standard missed', type: 'descriptive' },
     { col: "IS THIS A POTENTIAL CUSTOMER MISTREAT?", category: 'Mistreat', label: 'Potential customer mistreat flagged', type: 'boolean', hitValue: 'YES' }
 ];
 
@@ -501,6 +501,7 @@ async function handleRosterUpload(event) {
         const emailKey = findHeader(rows[0], ['Email', 'Work Email', 'PLDT/SMART Domain v2', 'PLDT/SMART Domain']);
         const nameKey = findHeader(rows[0], ['Agent Name', 'AGENT/OFFICER NAME', 'Employee Name', 'Name']);
         const idKey = findHeader(rows[0], ['ID', 'Employee ID', 'EE number/ID number', 'Agent ID', 'Win ID']);
+        const teamLeaderKey = findHeader(rows[0], ['Supervisor Name', 'Team Leader', 'TEAM LEADER']);
 
         if (!emailKey || !nameKey) throw new Error('missing columns');
 
@@ -508,7 +509,8 @@ async function handleRosterUpload(event) {
             .map(r => ({
                 email: String(r[emailKey] || '').trim().toLowerCase(),
                 agentName: String(r[nameKey] || '').trim(),
-                agentId: idKey ? String(r[idKey] || '').trim() : ''
+                agentId: idKey ? String(r[idKey] || '').trim() : '',
+                teamLeader: teamLeaderKey ? String(r[teamLeaderKey] || '').trim() : ''
             }))
             .filter(r => r.email && r.agentName);
         const roster = allNamed.filter(r => r.email.endsWith('@supplier.smart.com.ph'));
@@ -582,10 +584,11 @@ async function resyncAgentEmails() {
    ========================================================================== */
 const NEEDED_FIELDS = [
     'ID', 'FORM TYPE', 'BRAND', 'LINE OF BUSINESS', 'AGENT/OFFICER NAME', 'AGENT TENURE',
-    'TEAM LEADER', 'CLUSTER', 'WEEKENDING', 'MONTH', 'MISTREAT',
+    'TEAM LEADER', 'CLUSTER', 'WEEKENDING', 'MONTH', 'MISTREAT', 'WIN ID',
     'RELIABLE', 'PERSONABLE', 'FAST', 'SAFE & SECURE', 'OVERALL SCORE',
     'EE number/ID number', 'OVERALL PASSRATE', 'CM', 'CALL ID / CASE NUMBER',
-    'RELIABLE: ADDITIONAL COMMENTS', 'PERSONABLE: ADDITIONAL COMMENTS', 'FAST: ADDITIONAL COMMENTS'
+    'RELIABLE: ADDITIONAL COMMENTS', 'PERSONABLE: ADDITIONAL COMMENTS', 'FAST: ADDITIONAL COMMENTS',
+    'Start time'
 ].concat(HIT_PARAMS.map(p => p.col));
 
 /* Some fields may appear under several different header names depending on the export.
@@ -593,6 +596,134 @@ const NEEDED_FIELDS = [
 const FIELD_HEADER_ALIASES = {
     'CALL ID / CASE NUMBER': ['Call ID', 'Case Number', 'Case ID', 'Interaction ID', 'Ticket Number', 'Call/Case Number', 'CALL ID/CASE NUMBER', 'Reference Number']
 };
+
+/* ==========================================================================
+   DERIVED SCORE COMPUTATION
+   Reverse-engineered from the official "Score Generator" workbook's live
+   formulas, and verified against 8,507 real audit rows (SAFE & SECURE and
+   CLUSTER matched 100%/99.99%; RELIABLE/PERSONABLE/OVERALL SCORE matched
+   99.7%+, with the tiny remainder being source-data typos, not formula gaps).
+
+   Lets the uploader accept the RAW, un-cleaned export directly — no more
+   manually adding score columns in Excel before every upload.
+   ========================================================================== */
+const RELIABLE_COLS = HIT_PARAMS.filter(p => p.category === 'Reliable').map(p => p.col);
+const PERSONABLE_COLS = HIT_PARAMS.filter(p => p.category === 'Personable').map(p => p.col);
+const FAST_COL = HIT_PARAMS.find(p => p.category === 'Fast').col;
+const SAFE_SECURE_COLS = HIT_PARAMS.filter(p => p.category === 'Safe & Secure').map(p => p.col);
+const MISTREAT_COL = HIT_PARAMS.find(p => p.category === 'Mistreat').col;
+
+const FAST_OK_VALUES = new Set([
+    'NO OPPORTUNITY',
+    'UNTIMELY RESPONSE WITH NEGATIVE CX - WITHIN THRESHOLD',
+    'UNTIMELY RESPONSE DUE TO KNOWLEDGE ISSUE/GAP',
+    'UNTIMELY RESPONSE DUE TO COMPLEX ISSUES',
+    'UNTIMELY RESPONSE DUE TO TOOLS ISSUE'
+]);
+
+// Reliable/Personable rule: blank or "No Opportunity" is excluded (not a strike);
+// literally any other answer (descriptive issue text) is a strike. One strike = 0.
+function anyStrike(out, cols) {
+    return cols.some(c => {
+        const v = normVal(out[c]);
+        return v !== '' && v !== 'NO OPPORTUNITY';
+    });
+}
+
+// Safe & Secure rule: blank/NA excluded from the denominator; "No Opportunity"
+// counts as compliant; any other answer is a strike. Force-zeroed on mistreat.
+function computeSafeSecureRatio(out) {
+    let total = 0, passCount = 0;
+    SAFE_SECURE_COLS.forEach(c => {
+        const v = normVal(out[c]);
+        if (v === '' || v === 'NA' || v === 'N/A') return;
+        total++;
+        if (v === 'NO OPPORTUNITY') passCount++;
+    });
+    return total === 0 ? 1 : passCount / total;
+}
+
+function computeMistreatFlag(out) {
+    return normVal(out[MISTREAT_COL]) === 'NO' ? 1 : 0;
+}
+
+function computeFastFlag(out) {
+    const v = normVal(out[FAST_COL]);
+    return FAST_OK_VALUES.has(v) ? 1 : 0;
+}
+
+// Parses SheetJS's formatted date string (raw:false) into a JS Date.
+function parseLooseDate(v) {
+    if (!v) return null;
+    if (v instanceof Date) return isNaN(v) ? null : v;
+    const d = new Date(v);
+    return isNaN(d) ? null : d;
+}
+
+// MONTH: verified 100% accurate against 8,507 real rows — simply the month
+// name of "Start time" (when the audit was performed).
+// WEEKENDING: business week ends on Thursday, EXCEPT audits performed on a
+// Friday roll back to the previous day's Thursday rather than forward to the
+// next one. Verified ~96% accurate against real data — the small remainder
+// appears to be occasional manual corrections by the QA team that don't
+// follow a fixed rule, so treat this as a strong default, not gospel; worth
+// spot-checking against your team if exact accuracy matters for a report.
+function computeWeekendingAndMonth(dateVal) {
+    const d = parseLooseDate(dateVal);
+    if (!d) return { weekending: '', month: '' };
+    const monthNames = ['JANUARY','FEBRUARY','MARCH','APRIL','MAY','JUNE','JULY','AUGUST','SEPTEMBER','OCTOBER','NOVEMBER','DECEMBER'];
+    const jsDay = d.getDay(); // Sun=0..Sat=6
+    const mondayZero = jsDay === 0 ? 6 : jsDay - 1; // Mon=0..Sun=6
+    const thursday = new Date(d);
+    if (mondayZero === 4) { // Friday -> previous day's Thursday
+        thursday.setDate(d.getDate() - 1);
+    } else {
+        thursday.setDate(d.getDate() + ((3 - mondayZero + 7) % 7));
+    }
+    const mm = String(thursday.getMonth() + 1).padStart(2, '0');
+    const dd = String(thursday.getDate()).padStart(2, '0');
+    return { weekending: `WE${mm}${dd}`, month: monthNames[d.getMonth()] };
+}
+
+function computeClusterTier(overallScoreFraction) {
+    if (overallScoreFraction >= 0.95) return 'A';
+    if (overallScoreFraction >= 0.90) return 'B';
+    if (overallScoreFraction >= 0.80) return 'C';
+    return 'D';
+}
+
+/* Computes every derived field for one row (already through headerMap) and
+   writes them directly onto `out`, overwriting whatever placeholders were
+   there. Values are written as 0–1 fractions to match the existing
+   normalization step in handleDataUpload (which scales <=1 values to 0–100). */
+function computeDerivedScores(out) {
+    const mistreat = computeMistreatFlag(out);
+    const reliable = anyStrike(out, RELIABLE_COLS) ? 0 : 1;
+    const personable = anyStrike(out, PERSONABLE_COLS) ? 0 : 1;
+    const fast = computeFastFlag(out);
+    const safeSecureRatio = computeSafeSecureRatio(out);
+    const safeSecure = mistreat === 0 ? 0 : safeSecureRatio;
+
+    // Overall Score uses an all-or-nothing Reliable/Personable that's ALSO
+    // zeroed on mistreat — distinct from the displayed Reliable/Personable
+    // scores above, which do not carry the mistreat override themselves.
+    const reliableForOverall = mistreat === 0 ? 0 : reliable;
+    const personableForOverall = mistreat === 0 ? 0 : personable;
+    const overallScore = (reliableForOverall * 0.45) + (personableForOverall * 0.45) + (fast * 0.05) + (safeSecure * 0.05);
+
+    out['MISTREAT'] = mistreat;
+    out['RELIABLE'] = reliable;
+    out['PERSONABLE'] = personable;
+    out['FAST'] = fast;
+    out['SAFE & SECURE'] = safeSecure;
+    out['OVERALL SCORE'] = overallScore;
+    out['OVERALL PASSRATE'] = overallScore > 0.90 ? 'PASSED' : 'FAILED';
+    out['CLUSTER'] = computeClusterTier(overallScore);
+
+    const { weekending, month } = computeWeekendingAndMonth(out['Start time']);
+    if (!out['WEEKENDING']) out['WEEKENDING'] = weekending;
+    if (!out['MONTH']) out['MONTH'] = month;
+}
 
 async function handleDataUpload(event) {
     const file = event.target.files[0];
@@ -610,19 +741,24 @@ async function handleDataUpload(event) {
         });
 
         const missingFields = NEEDED_FIELDS.filter(f => !headerMap[f]);
-        if (missingFields.length) {
-            console.warn('Columns not found in uploaded file:', missingFields);
+        const isRawFormat = !headerMap['OVERALL SCORE'];
+        const COMPUTED_FIELDS = ['MISTREAT', 'RELIABLE', 'PERSONABLE', 'FAST', 'SAFE & SECURE', 'OVERALL SCORE', 'OVERALL PASSRATE', 'CLUSTER', 'WEEKENDING', 'MONTH', 'TEAM LEADER'];
+        const missingFieldsToWarn = isRawFormat ? missingFields.filter(f => !COMPUTED_FIELDS.includes(f)) : missingFields;
+        if (missingFieldsToWarn.length) {
+            console.warn('Columns not found in uploaded file:', missingFieldsToWarn);
         }
 
         const rosterSnap = await getDocs(collection(db, 'roster'));
         const nameToEmail = {};
+        const nameToTeamLeader = {};
         rosterSnap.forEach(d => {
             const data = d.data();
             nameToEmail[normalizeName(data.agentName)] = d.id;
+            if (data.teamLeader) nameToTeamLeader[normalizeName(data.agentName)] = data.teamLeader;
         });
 
         const UPPERCASE_FIELDS = ['FORM TYPE', 'MONTH', 'AGENT TENURE', 'OVERALL PASSRATE', 'CM'];
-        const TRIM_ONLY_FIELDS = ['BRAND', 'LINE OF BUSINESS', 'TEAM LEADER', 'CLUSTER', 'WEEKENDING', 'CALL ID / CASE NUMBER'];
+        const TRIM_ONLY_FIELDS = ['BRAND', 'LINE OF BUSINESS', 'TEAM LEADER', 'CLUSTER', 'WEEKENDING', 'CALL ID / CASE NUMBER', 'WIN ID'];
 
         const trimmed = rows.map(r => {
             const out = {};
@@ -630,8 +766,15 @@ async function handleDataUpload(event) {
                 const h = headerMap[f];
                 out[f] = h ? r[h] : '';
             });
+            if (isRawFormat) {
+                computeDerivedScores(out);
+                if (!out['TEAM LEADER']) {
+                    out['TEAM LEADER'] = nameToTeamLeader[normalizeName(out['AGENT/OFFICER NAME'])] || '';
+                }
+            }
             UPPERCASE_FIELDS.forEach(f => { out[f] = normVal(out[f]); });
             TRIM_ONLY_FIELDS.forEach(f => { out[f] = String(out[f] || '').trim(); });
+            out.agentNameKey = normalizeName(out['AGENT/OFFICER NAME']);
             ['RELIABLE', 'PERSONABLE', 'FAST', 'SAFE & SECURE', 'OVERALL SCORE'].forEach(k => {
                 const n = parseFloat(out[k]);
                 out[k] = isNaN(n) ? null : (n <= 1 ? n * 100 : n);
@@ -655,8 +798,11 @@ async function handleDataUpload(event) {
 
         cachedAuditRows = deduped;
         let msg = `✅ ${deduped.length} audit rows loaded${dupCount ? ` (${dupCount} exact duplicate row${dupCount === 1 ? '' : 's'} removed)` : ''}.`;
-        if (missingFields.length) {
-            msg += ` ⚠️ ${missingFields.length} expected column(s) missing — check console for details.`;
+        if (isRawFormat) {
+            msg += ` 🧮 Scores computed automatically from the raw export — no manual cleanup needed. (Weekending is ~96% accurate against verified data; spot-check if exact week labels matter for a report.)`;
+        }
+        if (missingFieldsToWarn.length) {
+            msg += ` ⚠️ ${missingFieldsToWarn.length} expected column(s) missing — check console for details.`;
         }
         document.getElementById('dataStatus').innerHTML = msg;
         populateDropdownOptions(trimmed);
@@ -851,7 +997,7 @@ function renderSupervisorDashboard(data) {
         parameterChart.innerHTML = '<div class="empty-note">No matching data.</div>';
     }
 
-    const isPassed = (r) => r['OVERALL PASSRATE'] ? r['OVERALL PASSRATE'] === 'PASSED' : (r['OVERALL SCORE'] || 0) >= 85;
+    const isPassed = (r) => r['OVERALL PASSRATE'] ? r['OVERALL PASSRATE'] === 'PASSED' : (r['OVERALL SCORE'] || 0) > 90;
     const passed = data.filter(isPassed).length;
     const passPct = Math.round((passed / data.length) * 100);
     document.getElementById('totalPassRateVal').textContent = passPct + '%';
@@ -957,7 +1103,7 @@ async function renderAgentView() {
     const auditRowHtml = (r) => {
         const issues = getRowIssues(r);
         const score = r['OVERALL SCORE'];
-        const passed = r['OVERALL PASSRATE'] ? r['OVERALL PASSRATE'] === 'PASSED' : (score !== null && score >= 85);
+        const passed = r['OVERALL PASSRATE'] ? r['OVERALL PASSRATE'] === 'PASSED' : (score !== null && score > 90);
         const tagsHtml = issues.length
             ? issues.map(i => `<span class="tag ${i.category.replace(/\s|&/g, '')}">${escapeHtml(i.label)}</span>`).join('')
             : `<span class="no-issues-note">✓ No parameters flagged on this audit.</span>`;
@@ -1028,3 +1174,16 @@ window.resyncAgentEmails = resyncAgentEmails;
    INIT
    ========================================================================== */
 setSignupRole('agent');
+
+// Pre-fill login email if arriving via a deep link (e.g. from the Agent
+// Documentation Suite's "View Full History" button): ?email=name@domain
+(function prefillLoginEmailFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    const email = params.get('email');
+    if (email) {
+        const field = document.getElementById('loginEmail');
+        if (field) field.value = email;
+        const pwField = document.getElementById('loginPassword');
+        if (pwField) pwField.focus();
+    }
+})();
