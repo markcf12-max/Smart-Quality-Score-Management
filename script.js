@@ -586,7 +586,7 @@ const NEEDED_FIELDS = [
     'ID', 'FORM TYPE', 'BRAND', 'LINE OF BUSINESS', 'AGENT/OFFICER NAME', 'AGENT TENURE',
     'TEAM LEADER', 'CLUSTER', 'WEEKENDING', 'MONTH', 'MISTREAT', 'WIN ID',
     'RELIABLE', 'PERSONABLE', 'FAST', 'SAFE & SECURE', 'OVERALL SCORE',
-    'EE number/ID number', 'OVERALL PASSRATE', 'CM', 'CALL ID / CASE NUMBER',
+    'EE number/ID number', 'OVERALL PASSRATE', 'CM', 'CALL ID / CASE NUMBER', 'MIN',
     'RELIABLE: ADDITIONAL COMMENTS', 'PERSONABLE: ADDITIONAL COMMENTS', 'FAST: ADDITIONAL COMMENTS',
     'Start time'
 ].concat(HIT_PARAMS.map(p => p.col));
@@ -594,7 +594,11 @@ const NEEDED_FIELDS = [
 /* Some fields may appear under several different header names depending on the export.
    Falls back to the field's own name if no alias list is given. */
 const FIELD_HEADER_ALIASES = {
-    'CALL ID / CASE NUMBER': ['Call ID', 'Case Number', 'Case ID', 'Interaction ID', 'Ticket Number', 'Call/Case Number', 'CALL ID/CASE NUMBER', 'Reference Number']
+    'CALL ID / CASE NUMBER': ['Call ID', 'Case Number', 'Case ID', 'Interaction ID', 'Ticket Number', 'Call/Case Number', 'CALL ID/CASE NUMBER', 'Reference Number'],
+    // Customer mobile number — inconsistently labeled across exports; seen as
+    // both 'ANI/DNIS NUMBER' (raw MS Forms export) and 'PRODUCT' (a mislabeled
+    // column in some cleaned files that actually holds the phone number).
+    'MIN': ['MIN', 'ANI/DNIS NUMBER', 'ANI', 'DNIS', 'Mobile Number', 'MSISDN', 'PRODUCT']
 };
 
 /* ==========================================================================
@@ -767,7 +771,7 @@ async function handleDataUpload(event) {
         });
 
         const UPPERCASE_FIELDS = ['FORM TYPE', 'MONTH', 'AGENT TENURE', 'OVERALL PASSRATE', 'CM'];
-        const TRIM_ONLY_FIELDS = ['BRAND', 'LINE OF BUSINESS', 'TEAM LEADER', 'CLUSTER', 'WEEKENDING', 'CALL ID / CASE NUMBER', 'WIN ID'];
+        const TRIM_ONLY_FIELDS = ['BRAND', 'LINE OF BUSINESS', 'TEAM LEADER', 'CLUSTER', 'WEEKENDING', 'CALL ID / CASE NUMBER', 'WIN ID', 'MIN'];
 
         const trimmed = rows.map(r => {
             const out = {};
@@ -1135,7 +1139,7 @@ async function renderAgentView() {
                 <span>${escapeHtml(r['WEEKENDING'])} · ${escapeHtml(r['FORM TYPE'])} · ${escapeHtml(r['BRAND'])}</span>
                 <span class="score-pill ${passed ? 'pass-pill' : 'fail-pill'}">${score === null ? '-' : score + '%'}</span>
             </div>
-            <div class="audit-meta">Team Leader: ${escapeHtml(r['TEAM LEADER']) || '—'} · Cluster: ${escapeHtml(r['CLUSTER']) || '—'} · Month: ${escapeHtml(r['MONTH']) || '—'}${r['CALL ID / CASE NUMBER'] ? ` · ${normVal(r['BRAND']) === 'SMART EBG' ? 'Call ID' : 'Case #'}: ${escapeHtml(r['CALL ID / CASE NUMBER'])}` : ''}</div>
+            <div class="audit-meta">Team Leader: ${escapeHtml(r['TEAM LEADER']) || '—'} · Cluster: ${escapeHtml(r['CLUSTER']) || '—'} · Month: ${escapeHtml(r['MONTH']) || '—'}${r['CALL ID / CASE NUMBER'] ? ` · ${normVal(r['BRAND']) === 'SMART EBG' ? 'Call ID' : 'Case #'}: ${escapeHtml(r['CALL ID / CASE NUMBER'])}` : ''}${r['MIN'] ? ` · ANI: ${escapeHtml(r['MIN'])}` : ''}</div>
             <div>${tagsHtml}</div>
             ${commentsHtml}
         </div>`;
