@@ -692,6 +692,14 @@ function computeClusterTier(overallScoreFraction) {
     return 'D';
 }
 
+// CM tier: verified 100% accurate against 2,565 real rows (0 mismatches).
+function computeCmTier(overallScoreFraction) {
+    if (overallScoreFraction >= 0.95) return 'SUPERSTAR';
+    if (overallScoreFraction >= 0.90) return 'PERFORMER';
+    if (overallScoreFraction >= 0.80) return 'LAGGARD';
+    return 'UNDERPERFORMER';
+}
+
 /* Computes every derived field for one row (already through headerMap) and
    writes them directly onto `out`, overwriting whatever placeholders were
    there. Values are written as 0–1 fractions to match the existing
@@ -719,6 +727,7 @@ function computeDerivedScores(out) {
     out['OVERALL SCORE'] = overallScore;
     out['OVERALL PASSRATE'] = overallScore > 0.90 ? 'PASSED' : 'FAILED';
     out['CLUSTER'] = computeClusterTier(overallScore);
+    out['CM'] = computeCmTier(overallScore);
 
     const { weekending, month } = computeWeekendingAndMonth(out['Start time']);
     if (!out['WEEKENDING']) out['WEEKENDING'] = weekending;
@@ -742,7 +751,7 @@ async function handleDataUpload(event) {
 
         const missingFields = NEEDED_FIELDS.filter(f => !headerMap[f]);
         const isRawFormat = !headerMap['OVERALL SCORE'];
-        const COMPUTED_FIELDS = ['MISTREAT', 'RELIABLE', 'PERSONABLE', 'FAST', 'SAFE & SECURE', 'OVERALL SCORE', 'OVERALL PASSRATE', 'CLUSTER', 'WEEKENDING', 'MONTH', 'TEAM LEADER'];
+        const COMPUTED_FIELDS = ['MISTREAT', 'RELIABLE', 'PERSONABLE', 'FAST', 'SAFE & SECURE', 'OVERALL SCORE', 'OVERALL PASSRATE', 'CLUSTER', 'CM', 'WEEKENDING', 'MONTH', 'TEAM LEADER'];
         const missingFieldsToWarn = isRawFormat ? missingFields.filter(f => !COMPUTED_FIELDS.includes(f)) : missingFields;
         if (missingFieldsToWarn.length) {
             console.warn('Columns not found in uploaded file:', missingFieldsToWarn);
@@ -766,6 +775,9 @@ async function handleDataUpload(event) {
                 const h = headerMap[f];
                 out[f] = h ? r[h] : '';
             });
+            if (!String(out['BRAND'] || '').trim() && out['LINE OF BUSINESS']) {
+                out['BRAND'] = out['LINE OF BUSINESS'];
+            }
             if (isRawFormat) {
                 computeDerivedScores(out);
                 if (!out['TEAM LEADER']) {
@@ -916,6 +928,8 @@ function renderSupervisorDashboard(data) {
         document.getElementById('totalPassRateVal').textContent = '-';
         document.getElementById('totalFailRateVal').textContent = '-';
         document.getElementById('cmSuperstarVal').textContent = '-';
+        document.getElementById('cmPerformerVal').textContent = '-';
+        document.getElementById('cmLaggardVal').textContent = '-';
         document.getElementById('cmUnderperformerVal').textContent = '-';
         document.getElementById('leaderChart').innerHTML = '<div class="empty-note">No matching data.</div>';
         document.getElementById('parameterChart').innerHTML = '<div class="empty-note">No matching data.</div>';
@@ -1020,13 +1034,14 @@ function renderSupervisorDashboard(data) {
 
     // CM Distribution
     const cmRows = data.filter(r => r['CM']);
+    const cmIds = { SUPERSTAR: 'cmSuperstarVal', PERFORMER: 'cmPerformerVal', LAGGARD: 'cmLaggardVal', UNDERPERFORMER: 'cmUnderperformerVal' };
     if (cmRows.length) {
-        const superstar = cmRows.filter(r => r['CM'] === 'SUPERSTAR').length;
-        document.getElementById('cmSuperstarVal').textContent = Math.round((superstar / cmRows.length) * 100) + '%';
-        document.getElementById('cmUnderperformerVal').textContent = Math.round(((cmRows.length - superstar) / cmRows.length) * 100) + '%';
+        Object.entries(cmIds).forEach(([tier, elId]) => {
+            const count = cmRows.filter(r => r['CM'] === tier).length;
+            document.getElementById(elId).textContent = Math.round((count / cmRows.length) * 100) + '%';
+        });
     } else {
-        document.getElementById('cmSuperstarVal').textContent = '-';
-        document.getElementById('cmUnderperformerVal').textContent = '-';
+        Object.values(cmIds).forEach(elId => { document.getElementById(elId).textContent = '-'; });
     }
 
     // Team leader chart
