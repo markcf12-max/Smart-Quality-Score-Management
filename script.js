@@ -880,7 +880,28 @@ let cachedAuditRows = [];
 
 async function loadAllAuditData() {
     const snap = await getDocs(collection(db, 'auditData'));
-    cachedAuditRows = snap.docs.map(d => d.data());
+    const rows = snap.docs.map(d => d.data());
+
+    // Live roster join for Team Leader — computed fresh every time data loads,
+    // so it always reflects the CURRENT roster, even for rows that were
+    // uploaded before a roster update. No re-upload or resync needed; the
+    // moment the roster changes, every row self-corrects on next load.
+    try {
+        const rosterSnap = await getDocs(collection(db, 'roster'));
+        const nameToTeamLeader = {};
+        rosterSnap.forEach(d => {
+            const data = d.data();
+            if (data.teamLeader) nameToTeamLeader[normalizeName(data.agentName)] = data.teamLeader;
+        });
+        rows.forEach(r => {
+            const tl = nameToTeamLeader[normalizeName(r['AGENT/OFFICER NAME'])];
+            if (tl) r['TEAM LEADER'] = tl; // live roster always wins over whatever was stored at upload time
+        });
+    } catch (err) {
+        console.warn('Live Team Leader join failed — falling back to stored values.', err);
+    }
+
+    cachedAuditRows = rows;
     return cachedAuditRows;
 }
 
