@@ -592,8 +592,12 @@ const NEEDED_FIELDS = [
     'ID', 'FORM TYPE', 'BRAND', 'LINE OF BUSINESS', 'AGENT/OFFICER NAME', 'AGENT TENURE',
     'TEAM LEADER', 'CLUSTER', 'WEEKENDING', 'MONTH', 'MISTREAT', 'WIN ID',
     'RELIABLE', 'PERSONABLE', 'FAST', 'SAFE & SECURE', 'OVERALL SCORE',
-    'EE number/ID number', 'OVERALL PASSRATE', 'CM', 'CALL ID / CASE NUMBER', 'MIN',
-    'RELIABLE: ADDITIONAL COMMENTS', 'PERSONABLE: ADDITIONAL COMMENTS', 'FAST: ADDITIONAL COMMENTS',
+    'EE number/ID number', 'EE NUMBER / ID NUMBER', 'OVERALL PASSRATE', 'CM', 'CALL ID / CASE NUMBER', 'MIN',
+    'RELIABLE: ADDITIONAL COMMENTS', 
+    'PERSONABLE: ADDITIONAL COMMENTS', 
+    'FAST: ADDITIONAL COMMENTS',
+    'OTHER FACTORS REMARKS',
+    'WHAT MATTERS TO THE BUSINESS REMARKS',
     'Start time'
 ].concat(HIT_PARAMS.map(p => p.col));
 
@@ -1147,31 +1151,47 @@ async function renderAgentView() {
 
     const sorted = [...myRows].sort((a, b) => String(b['WEEKENDING'] || '').localeCompare(String(a['WEEKENDING'] || '')));
 
-    const auditRowHtml = (r) => {
-        const issues = getRowIssues(r);
-        const score = r['OVERALL SCORE'];
-        const passed = r['OVERALL PASSRATE'] ? r['OVERALL PASSRATE'] === 'PASSED' : (score !== null && score > 90);
-        const tagsHtml = issues.length
-            ? issues.map(i => `<span class="tag ${i.category.replace(/\s|&/g, '')}">${escapeHtml(i.label)}</span>`).join('')
-            : `<span class="no-issues-note">✓ No parameters flagged on this audit.</span>`;
+const auditRowHtml = (r) => {
+    const issues = getRowIssues(r);
+    const score = r['OVERALL SCORE'];
+    const passed = r['OVERALL PASSRATE'] ? r['OVERALL PASSRATE'] === 'PASSED' : (score !== null && score > 90);
+    const tagsHtml = issues.length
+        ? issues.map(i => `<span class="tag ${i.category.replace(/\s|&/g, '')}">${escapeHtml(i.label)}</span>`).join('')
+        : `<span class="no-issues-note">✓ No parameters flagged on this audit.</span>`;
 
-        const comments = ['RELIABLE: ADDITIONAL COMMENTS', 'PERSONABLE: ADDITIONAL COMMENTS', 'FAST: ADDITIONAL COMMENTS']
-            .map(f => String(r[f] || '').trim())
-            .filter(c => c && !NON_ISSUE_VALUES.has(c.toUpperCase()));
-        const commentsHtml = comments.length
-            ? `<div class="audit-comments">${comments.map(c => `<p>${escapeHtml(c)}</p>`).join('')}</div>`
-            : '';
+    // Map all comment/remark fields with clear section labels
+    const commentFields = [
+        { key: 'RELIABLE: ADDITIONAL COMMENTS', label: 'Reliable Comments' },
+        { key: 'PERSONABLE: ADDITIONAL COMMENTS', label: 'Personable Comments' },
+        { key: 'FAST: ADDITIONAL COMMENTS', label: 'Fast Comments' },
+        { key: 'OTHER FACTORS REMARKS', label: 'Other Factors Remarks' },
+        { key: 'WHAT MATTERS TO THE BUSINESS REMARKS', label: 'What Matters to the Business Remarks' }
+    ];
 
-        return `<div class="audit-row">
-            <div class="audit-head">
-                <span>${escapeHtml(r['WEEKENDING'])} · ${escapeHtml(r['FORM TYPE'])} · ${escapeHtml(r['BRAND'])}</span>
-                <span class="score-pill ${passed ? 'pass-pill' : 'fail-pill'}">${score === null ? '-' : score + '%'}</span>
-            </div>
-            <div class="audit-meta">Team Leader: ${escapeHtml(r['TEAM LEADER']) || '—'} · Cluster: ${escapeHtml(r['CLUSTER']) || '—'} · Month: ${escapeHtml(r['MONTH']) || '—'}${r['CALL ID / CASE NUMBER'] ? ` · ${normVal(r['BRAND']) === 'SMART EBG' ? 'Call ID' : 'Case #'}: ${escapeHtml(r['CALL ID / CASE NUMBER'])}` : ''}${r['MIN'] ? ` · ANI: ${escapeHtml(r['MIN'])}` : ''}</div>
-            <div>${tagsHtml}</div>
-            ${commentsHtml}
-        </div>`;
-    };
+    const commentsList = commentFields
+        .map(item => {
+            const val = String(r[item.key] || '').trim();
+            if (val && !NON_ISSUE_VALUES.has(val.toUpperCase())) {
+                return `<strong>${escapeHtml(item.label)}:</strong> ${escapeHtml(val)}`;
+            }
+            return null;
+        })
+        .filter(Boolean);
+
+    const commentsHtml = commentsList.length
+        ? `<div class="audit-comments">${commentsList.map(c => `<p>${c}</p>`).join('')}</div>`
+        : '';
+
+    return `<div class="audit-row">
+        <div class="audit-head">
+            <span>${escapeHtml(r['WEEKENDING'])} · ${escapeHtml(r['FORM TYPE'])} · ${escapeHtml(r['BRAND'])}</span>
+            <span class="score-pill ${passed ? 'pass-pill' : 'fail-pill'}">${score === null ? '-' : score + '%'}</span>
+        </div>
+        <div class="audit-meta">Team Leader: ${escapeHtml(r['TEAM LEADER']) || '—'} · Cluster: ${escapeHtml(r['CLUSTER']) || '—'} · Month: ${escapeHtml(r['MONTH']) || '—'}${r['CALL ID / CASE NUMBER'] ? ` · ${normVal(r['BRAND']) === 'SMART EBG' ? 'Call ID' : 'Case #'}: ${escapeHtml(r['CALL ID / CASE NUMBER'])}` : ''}${r['MIN'] ? ` · ANI: ${escapeHtml(r['MIN'])}` : ''}</div>
+        <div>${tagsHtml}</div>
+        ${commentsHtml}
+    </div>`;
+};
 
     const groups = {};
     sorted.forEach(r => {
