@@ -518,8 +518,9 @@ async function handleRosterUpload(event) {
 
         await clearCollection('roster');
         await batchWriteDocs('roster', roster, (r) => r.email);
+        await resyncAgentEmails();
 
-        document.getElementById('rosterStatus').innerHTML = `✅ Roster loaded: ${roster.length} agents matched to emails.` +
+        document.getElementById('rosterStatus').innerHTML = `✅ Roster loaded: ${roster.length} agents matched to emails. 🔄 Existing audit data auto-synced to match.` +
             (skippedOtherDomain > 0 ? ` (${skippedOtherDomain} skipped — not on @supplier.smart.com.ph)` : '');
     } catch (err) {
         console.error(err);
@@ -811,9 +812,10 @@ async function handleDataUpload(event) {
         const dupCount = trimmed.length - deduped.length;
 
         await replaceAuditData(deduped);
+        await resyncAgentEmails();
 
         cachedAuditRows = deduped;
-        let msg = `✅ ${deduped.length} audit rows loaded${dupCount ? ` (${dupCount} exact duplicate row${dupCount === 1 ? '' : 's'} removed)` : ''}.`;
+        let msg = `✅ ${deduped.length} audit rows loaded${dupCount ? ` (${dupCount} exact duplicate row${dupCount === 1 ? '' : 's'} removed)` : ''}. 🔄 Agent email matching auto-synced.`;
         if (isRawFormat) {
             msg += ` 🧮 Scores computed automatically from the raw export — no manual cleanup needed. (Weekending is ~96% accurate against verified data; spot-check if exact week labels matter for a report.)`;
         }
