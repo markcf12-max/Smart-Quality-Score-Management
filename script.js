@@ -515,13 +515,18 @@ async function handleRosterUpload(event) {
             .filter(r => r.email && r.agentName);
         const roster = allNamed.filter(r => r.email.endsWith('@supplier.smart.com.ph'));
         const skippedOtherDomain = allNamed.length - roster.length;
+        const withTeamLeader = roster.filter(r => r.teamLeader).length;
 
         await clearCollection('roster');
         await batchWriteDocs('roster', roster, (r) => r.email);
         await resyncAgentEmails();
 
-        document.getElementById('rosterStatus').innerHTML = `✅ Roster loaded: ${roster.length} agents matched to emails. 🔄 Existing audit data auto-synced to match.` +
-            (skippedOtherDomain > 0 ? ` (${skippedOtherDomain} skipped — not on @supplier.smart.com.ph)` : '');
+        let rosterMsg = `✅ Roster loaded: ${roster.length} agents matched to emails. 🔄 Existing audit data auto-synced to match.`;
+        rosterMsg += teamLeaderKey
+            ? ` Team Leader column found ("${teamLeaderKey}") — ${withTeamLeader}/${roster.length} agents have a Team Leader assigned.`
+            : ` ⚠️ No Team Leader column detected in this file (looked for "Supervisor Name", "Team Leader", or "TEAM LEADER") — Team Leader will show as Unassigned until this is fixed.`;
+        if (skippedOtherDomain > 0) rosterMsg += ` (${skippedOtherDomain} skipped — not on @supplier.smart.com.ph)`;
+        document.getElementById('rosterStatus').innerHTML = rosterMsg;
     } catch (err) {
         console.error(err);
         document.getElementById('rosterStatus').innerHTML =
