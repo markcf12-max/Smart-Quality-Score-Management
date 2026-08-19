@@ -17,6 +17,17 @@ import {
 const TEAM_LEADER_INVITE_CODE = 'SMART-TL-2026';
 const QUALITY_INVITE_CODE = 'SMART-QA-2026';
 
+/* Robust score parser that safely converts strings, percentages, and fractions into 0-100 values */
+function parseScore(val) {
+    if (val === null || val === undefined) return null;
+    if (typeof val === 'number') return isNaN(val) ? null : val;
+    let s = String(val).trim().replace('%', '');
+    if (s === '' || s === 'N/A' || s === 'NA' || s === '-') return null;
+    let n = parseFloat(s);
+    if (isNaN(n)) return null;
+    return n <= 1 ? n * 100 : n;
+}
+
 /* Firestore write batches max out at 500 ops — chunk anything bigger */
 async function batchWriteDocs(collectionName, docs, idFn) {
     const chunks = [];
@@ -101,8 +112,6 @@ function showAuthMsg(elId, text, ok) {
 let authFlowInProgress = false;
 const REQUIRED_EMAIL_DOMAIN = '@supplier.smart.com.ph';
 
-/* Specific non-standard emails allowed to bypass the domain check
-   (e.g. a Quality supervisor whose real work email is on a different domain) */
 const EMAIL_DOMAIN_EXCEPTIONS = new Set([
     't-jtagores@pldt.com.ph'
 ]);
@@ -312,8 +321,8 @@ async function renderMyTeamPanel(rows) {
             if (!byAgent[name]) byAgent[name] = { RELIABLE: [], PERSONABLE: [], FAST: [], 'SAFE & SECURE': [], 'OVERALL SCORE': [], count: 0 };
             byAgent[name].count++;
             ['RELIABLE', 'PERSONABLE', 'FAST', 'SAFE & SECURE', 'OVERALL SCORE'].forEach(k => {
-                const v = r[k];
-                if (v !== null && v !== undefined && !isNaN(v)) byAgent[name][k].push(v);
+                const v = parseScore(r[k]);
+                if (v !== null) byAgent[name][k].push(v);
             });
         });
 
@@ -386,9 +395,7 @@ const MONTH_NUM = {
     MAY: 5, JUN: 6, JUNE: 6, JUL: 7, JULY: 7, AUG: 8, AUGUST: 8,
     SEP: 9, SEPT: 9, SEPTEMBER: 9, OCT: 10, OCTOBER: 10, NOV: 11, NOVEMBER: 11, DEC: 12, DECEMBER: 12
 };
-/* Sort key for calendar order. Recognizes a month name/abbreviation anywhere in the
-   string, plus a 4-digit year if present, so "JANUARY", "JAN-26", "January 2026" all sort
-   correctly. Values with no recognizable month fall back to the end, alphabetically. */
+
 function monthSortKey(monthStr) {
     const s = normVal(monthStr);
     const yearMatch = s.match(/(20\d{2})/);
@@ -398,9 +405,10 @@ function monthSortKey(monthStr) {
     for (const t of tokens) {
         if (MONTH_NUM[t]) { monthNum = MONTH_NUM[t]; break; }
     }
-    if (monthNum === null) return [1, s]; // unrecognized -> sorted after all recognized months
+    if (monthNum === null) return [1, s];
     return [0, year * 100 + monthNum, s];
 }
+
 function compareMonths(a, b) {
     const ka = monthSortKey(a), kb = monthSortKey(b);
     for (let i = 0; i < Math.max(ka.length, kb.length); i++) {
@@ -601,25 +609,18 @@ const NEEDED_FIELDS = [
     'Start time'
 ].concat(HIT_PARAMS.map(p => p.col));
 
-/* Some fields may appear under several different header names depending on the export.
-   Falls back to the field's own name if no alias list is given. */
 const FIELD_HEADER_ALIASES = {
     'CALL ID / CASE NUMBER': ['Call ID', 'Case Number', 'Case ID', 'Interaction ID', 'Ticket Number', 'Call/Case Number', 'CALL ID/CASE NUMBER', 'Reference Number'],
-    // Customer mobile number — inconsistently labeled across exports; seen as
-    // both 'ANI/DNIS NUMBER' (raw MS Forms export) and 'PRODUCT' (a mislabeled
-    // column in some cleaned files that actually holds the phone number).
-    'MIN': ['MIN', 'ANI/DNIS NUMBER', 'ANI', 'DNIS', 'Mobile Number', 'MSISDN', 'PRODUCT']
+    'MIN': ['MIN', 'ANI/DNIS NUMBER', 'ANI', 'DNIS', 'Mobile Number', 'MSISDN', 'PRODUCT'],
+    'RELIABLE': ['Reliable', 'QA Reliable', 'Reliable Score'],
+    'PERSONABLE': ['Personable', 'QA Personable', 'Personable Score'],
+    'FAST': ['Fast', 'QA Fast', 'Fast Score'],
+    'SAFE & SECURE': ['Safe & Secure', 'Safe & Secure Score', 'QA Safe & Secure', 'QA Safe', 'Safe and Secure'],
+    'OVERALL SCORE': ['Overall Score', 'QA Overall Score', 'Overall QA Score', 'Overall QA Scores', 'Overall']
 };
 
 /* ==========================================================================
    DERIVED SCORE COMPUTATION
-   Reverse-engineered from the official "Score Generator" workbook's live
-   formulas, and verified against 8,507 real audit rows (SAFE & SECURE and
-   CLUSTER matched 100%/99.99%; RELIABLE/PERSONABLE/OVERALL SCORE matched
-   99.7%+, with the tiny remainder being source-data typos, not formula gaps).
-
-   Lets the uploader accept the RAW, un-cleaned export directly — no more
-   manually adding score columns in Excel before every upload.
    ========================================================================== */
 const RELIABLE_COLS = HIT_PARAMS.filter(p => p.category === 'Reliable').map(p => p.col);
 const PERSONABLE_COLS = HIT_PARAMS.filter(p => p.category === 'Personable').map(p => p.col);
@@ -635,8 +636,6 @@ const FAST_OK_VALUES = new Set([
     'UNTIMELY RESPONSE DUE TO TOOLS ISSUE'
 ]);
 
-// Reliable/Personable rule: blank or "No Opportunity" is excluded (not a strike);
-// literally any other answer (descriptive issue text) is a strike. One strike = 0.
 function anyStrike(out, cols) {
     return cols.some(c => {
         const v = normVal(out[c]);
@@ -644,8 +643,6 @@ function anyStrike(out, cols) {
     });
 }
 
-// Safe & Secure rule: blank/NA excluded from the denominator; "No Opportunity"
-// counts as compliant; any other answer is a strike. Force-zeroed on mistreat.
 function computeSafeSecureRatio(out) {
     let total = 0, passCount = 0;
     SAFE_SECURE_COLS.forEach(c => {
@@ -666,7 +663,6 @@ function computeFastFlag(out) {
     return FAST_OK_VALUES.has(v) ? 1 : 0;
 }
 
-// Parses SheetJS's formatted date string (raw:false) into a JS Date.
 function parseLooseDate(v) {
     if (!v) return null;
     if (v instanceof Date) return isNaN(v) ? null : v;
@@ -674,22 +670,14 @@ function parseLooseDate(v) {
     return isNaN(d) ? null : d;
 }
 
-// MONTH: verified 100% accurate against 8,507 real rows — simply the month
-// name of "Start time" (when the audit was performed).
-// WEEKENDING: business week ends on Thursday, EXCEPT audits performed on a
-// Friday roll back to the previous day's Thursday rather than forward to the
-// next one. Verified ~96% accurate against real data — the small remainder
-// appears to be occasional manual corrections by the QA team that don't
-// follow a fixed rule, so treat this as a strong default, not gospel; worth
-// spot-checking against your team if exact accuracy matters for a report.
 function computeWeekendingAndMonth(dateVal) {
     const d = parseLooseDate(dateVal);
     if (!d) return { weekending: '', month: '' };
     const monthNames = ['JANUARY','FEBRUARY','MARCH','APRIL','MAY','JUNE','JULY','AUGUST','SEPTEMBER','OCTOBER','NOVEMBER','DECEMBER'];
-    const jsDay = d.getDay(); // Sun=0..Sat=6
-    const mondayZero = jsDay === 0 ? 6 : jsDay - 1; // Mon=0..Sun=6
+    const jsDay = d.getDay();
+    const mondayZero = jsDay === 0 ? 6 : jsDay - 1;
     const thursday = new Date(d);
-    if (mondayZero === 4) { // Friday -> previous day's Thursday
+    if (mondayZero === 4) {
         thursday.setDate(d.getDate() - 1);
     } else {
         thursday.setDate(d.getDate() + ((3 - mondayZero + 7) % 7));
@@ -706,7 +694,6 @@ function computeClusterTier(overallScoreFraction) {
     return 'D';
 }
 
-// CM tier: verified 100% accurate against 2,565 real rows (0 mismatches).
 function computeCmTier(overallScoreFraction) {
     if (overallScoreFraction >= 0.95) return 'SUPERSTAR';
     if (overallScoreFraction >= 0.90) return 'PERFORMER';
@@ -714,10 +701,6 @@ function computeCmTier(overallScoreFraction) {
     return 'UNDERPERFORMER';
 }
 
-/* Computes every derived field for one row (already through headerMap) and
-   writes them directly onto `out`, overwriting whatever placeholders were
-   there. Values are written as 0–1 fractions to match the existing
-   normalization step in handleDataUpload (which scales <=1 values to 0–100). */
 function computeDerivedScores(out) {
     const mistreat = computeMistreatFlag(out);
     const reliable = anyStrike(out, RELIABLE_COLS) ? 0 : 1;
@@ -726,9 +709,6 @@ function computeDerivedScores(out) {
     const safeSecureRatio = computeSafeSecureRatio(out);
     const safeSecure = mistreat === 0 ? 0 : safeSecureRatio;
 
-    // Overall Score uses an all-or-nothing Reliable/Personable that's ALSO
-    // zeroed on mistreat — distinct from the displayed Reliable/Personable
-    // scores above, which do not carry the mistreat override themselves.
     const reliableForOverall = mistreat === 0 ? 0 : reliable;
     const personableForOverall = mistreat === 0 ? 0 : personable;
     const overallScore = (reliableForOverall * 0.45) + (personableForOverall * 0.45) + (fast * 0.05) + (safeSecure * 0.05);
@@ -801,10 +781,11 @@ async function handleDataUpload(event) {
             UPPERCASE_FIELDS.forEach(f => { out[f] = normVal(out[f]); });
             TRIM_ONLY_FIELDS.forEach(f => { out[f] = String(out[f] || '').trim(); });
             out.agentNameKey = normalizeName(out['AGENT/OFFICER NAME']);
+
             ['RELIABLE', 'PERSONABLE', 'FAST', 'SAFE & SECURE', 'OVERALL SCORE'].forEach(k => {
-                const n = parseFloat(out[k]);
-                out[k] = isNaN(n) ? null : (n <= 1 ? n * 100 : n);
+                out[k] = parseScore(out[k]);
             });
+
             out.agentEmailLower = nameToEmail[normalizeName(out['AGENT/OFFICER NAME'])] || '';
             return out;
         }).filter(r => r['AGENT/OFFICER NAME']);
@@ -826,7 +807,7 @@ async function handleDataUpload(event) {
         cachedAuditRows = deduped;
         let msg = `✅ ${deduped.length} audit rows loaded${dupCount ? ` (${dupCount} exact duplicate row${dupCount === 1 ? '' : 's'} removed)` : ''}. 🔄 Agent email matching auto-synced.`;
         if (isRawFormat) {
-            msg += ` 🧮 Scores computed automatically from the raw export — no manual cleanup needed. (Weekending is ~96% accurate against verified data; spot-check if exact week labels matter for a report.)`;
+            msg += ` 🧮 Scores computed automatically from the raw export — no manual cleanup needed.`;
         }
         if (missingFieldsToWarn.length) {
             msg += ` ⚠️ ${missingFieldsToWarn.length} expected column(s) missing — check console for details.`;
@@ -858,14 +839,12 @@ function populateDropdownOptions(rows) {
         if (uniques.includes(current)) sel.value = current;
     });
 
-    // Month, in calendar order
     const monthSel = document.getElementById('selectMonth');
     const monthCurrent = monthSel.value;
     const monthUniques = [...new Set(rows.map(r => r['MONTH']).filter(Boolean))].sort(compareMonths);
     monthSel.innerHTML = `<option value="ALL">(All Months)</option>` + monthUniques.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('');
     if (monthUniques.includes(monthCurrent)) monthSel.value = monthCurrent;
 
-    // Weekending, grouped under its Month via optgroups, months in calendar order
     const weekSel = document.getElementById('selectWeekending');
     const weekCurrent = weekSel.value;
     const monthGroups = {};
@@ -893,10 +872,6 @@ async function loadAllAuditData() {
     const snap = await getDocs(collection(db, 'auditData'));
     const rows = snap.docs.map(d => d.data());
 
-    // Live roster join for Team Leader — computed fresh every time data loads,
-    // so it always reflects the CURRENT roster, even for rows that were
-    // uploaded before a roster update. No re-upload or resync needed; the
-    // moment the roster changes, every row self-corrects on next load.
     try {
         const rosterSnap = await getDocs(collection(db, 'roster'));
         const nameToTeamLeader = {};
@@ -906,7 +881,7 @@ async function loadAllAuditData() {
         });
         rows.forEach(r => {
             const tl = nameToTeamLeader[normalizeName(r['AGENT/OFFICER NAME'])];
-            if (tl) r['TEAM LEADER'] = tl; // live roster always wins over whatever was stored at upload time
+            if (tl) r['TEAM LEADER'] = tl;
         });
     } catch (err) {
         console.warn('Live Team Leader join failed — falling back to stored values.', err);
@@ -974,7 +949,7 @@ function renderSupervisorDashboard(data) {
     }
 
     const avg = (key) => {
-        const vals = data.map(r => r[key]).filter(v => v !== null && v !== undefined && !isNaN(v));
+        const vals = data.map(r => parseScore(r[key])).filter(v => v !== null);
         if (!vals.length) return null;
         return Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
     };
@@ -982,7 +957,7 @@ function renderSupervisorDashboard(data) {
     const avgOverall = avg('OVERALL SCORE');
 
     /* ==========================================================================
-       GROUPED BAR CHART (Reliable, Personable, Fast, Safe & Secure, Overall Score)
+       GROUPED BAR CHART
        ========================================================================== */
     const categories = [
         { key: 'RELIABLE', label: 'Reliable', color: '#b2d8be' },
@@ -999,8 +974,8 @@ function renderSupervisorDashboard(data) {
             lobData[lob] = { RELIABLE: [], PERSONABLE: [], FAST: [], 'SAFE & SECURE': [], 'OVERALL SCORE': [] };
         }
         categories.forEach(c => {
-            const val = r[c.key];
-            if (val !== null && val !== undefined && !isNaN(val)) {
+            const val = parseScore(r[c.key]);
+            if (val !== null) {
                 lobData[lob][c.key].push(val);
             }
         });
@@ -1047,7 +1022,7 @@ function renderSupervisorDashboard(data) {
         parameterChart.innerHTML = '<div class="empty-note">No matching data.</div>';
     }
 
-    const isPassed = (r) => r['OVERALL PASSRATE'] ? r['OVERALL PASSRATE'] === 'PASSED' : (r['OVERALL SCORE'] || 0) > 90;
+    const isPassed = (r) => r['OVERALL PASSRATE'] ? r['OVERALL PASSRATE'] === 'PASSED' : (parseScore(r['OVERALL SCORE']) || 0) > 90;
     const passed = data.filter(isPassed).length;
     const passPct = Math.round((passed / data.length) * 100);
     document.getElementById('totalPassRateVal').textContent = passPct + '%';
@@ -1056,7 +1031,7 @@ function renderSupervisorDashboard(data) {
     const buckets = { b1: [], b2: [], b3: [] };
     data.forEach(r => buckets[tenureBucket(r['AGENT TENURE'])].push(r));
     const bucketAvg = (arr) => {
-        const vals = arr.map(r => r['OVERALL SCORE']).filter(v => v !== null && v !== undefined && !isNaN(v));
+        const vals = arr.map(r => parseScore(r['OVERALL SCORE'])).filter(v => v !== null);
         return vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) + '%' : '-';
     };
     document.getElementById('totalAuditNhip').textContent = buckets.b1.length || '-';
@@ -1085,7 +1060,8 @@ function renderSupervisorDashboard(data) {
     data.forEach(r => {
         const tl = r['TEAM LEADER'] || 'Unassigned';
         if (!tlScores[tl]) tlScores[tl] = { total: 0, count: 0 };
-        if (r['OVERALL SCORE'] !== null) { tlScores[tl].total += r['OVERALL SCORE']; tlScores[tl].count++; }
+        const sc = parseScore(r['OVERALL SCORE']);
+        if (sc !== null) { tlScores[tl].total += sc; tlScores[tl].count++; }
     });
     const leaderChart = document.getElementById('leaderChart');
     leaderChart.innerHTML = Object.entries(tlScores).map(([tl, s]) => {
@@ -1134,7 +1110,7 @@ async function renderAgentView() {
     document.getElementById('agentContent').style.display = 'flex';
 
     const avg = (key) => {
-        const vals = myRows.map(r => r[key]).filter(v => v !== null && v !== undefined && !isNaN(v));
+        const vals = myRows.map(r => parseScore(r[key])).filter(v => v !== null);
         return vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
     };
 
@@ -1151,47 +1127,46 @@ async function renderAgentView() {
 
     const sorted = [...myRows].sort((a, b) => String(b['WEEKENDING'] || '').localeCompare(String(a['WEEKENDING'] || '')));
 
-const auditRowHtml = (r) => {
-    const issues = getRowIssues(r);
-    const score = r['OVERALL SCORE'];
-    const passed = r['OVERALL PASSRATE'] ? r['OVERALL PASSRATE'] === 'PASSED' : (score !== null && score > 90);
-    const tagsHtml = issues.length
-        ? issues.map(i => `<span class="tag ${i.category.replace(/\s|&/g, '')}">${escapeHtml(i.label)}</span>`).join('')
-        : `<span class="no-issues-note">✓ No parameters flagged on this audit.</span>`;
+    const auditRowHtml = (r) => {
+        const issues = getRowIssues(r);
+        const score = parseScore(r['OVERALL SCORE']);
+        const passed = r['OVERALL PASSRATE'] ? r['OVERALL PASSRATE'] === 'PASSED' : (score !== null && score > 90);
+        const tagsHtml = issues.length
+            ? issues.map(i => `<span class="tag ${i.category.replace(/\s|&/g, '')}">${escapeHtml(i.label)}</span>`).join('')
+            : `<span class="no-issues-note">✓ No parameters flagged on this audit.</span>`;
 
-    // Map all comment/remark fields with clear section labels
-    const commentFields = [
-        { key: 'RELIABLE: ADDITIONAL COMMENTS', label: 'Reliable Comments' },
-        { key: 'PERSONABLE: ADDITIONAL COMMENTS', label: 'Personable Comments' },
-        { key: 'FAST: ADDITIONAL COMMENTS', label: 'Fast Comments' },
-        { key: 'OTHER FACTORS REMARKS', label: 'Other Factors Remarks' },
-        { key: 'WHAT MATTERS TO THE BUSINESS REMARKS', label: 'What Matters to the Business Remarks' }
-    ];
+        const commentFields = [
+            { key: 'RELIABLE: ADDITIONAL COMMENTS', label: 'Reliable Comments' },
+            { key: 'PERSONABLE: ADDITIONAL COMMENTS', label: 'Personable Comments' },
+            { key: 'FAST: ADDITIONAL COMMENTS', label: 'Fast Comments' },
+            { key: 'OTHER FACTORS REMARKS', label: 'Other Factors Remarks' },
+            { key: 'WHAT MATTERS TO THE BUSINESS REMARKS', label: 'What Matters to the Business Remarks' }
+        ];
 
-    const commentsList = commentFields
-        .map(item => {
-            const val = String(r[item.key] || '').trim();
-            if (val && !NON_ISSUE_VALUES.has(val.toUpperCase())) {
-                return `<strong>${escapeHtml(item.label)}:</strong> ${escapeHtml(val)}`;
-            }
-            return null;
-        })
-        .filter(Boolean);
+        const commentsList = commentFields
+            .map(item => {
+                const val = String(r[item.key] || '').trim();
+                if (val && !NON_ISSUE_VALUES.has(val.toUpperCase())) {
+                    return `<strong>${escapeHtml(item.label)}:</strong> ${escapeHtml(val)}`;
+                }
+                return null;
+            })
+            .filter(Boolean);
 
-    const commentsHtml = commentsList.length
-        ? `<div class="audit-comments">${commentsList.map(c => `<p>${c}</p>`).join('')}</div>`
-        : '';
+        const commentsHtml = commentsList.length
+            ? `<div class="audit-comments">${commentsList.map(c => `<p>${c}</p>`).join('')}</div>`
+            : '';
 
-    return `<div class="audit-row">
-        <div class="audit-head">
-            <span>${escapeHtml(r['WEEKENDING'])} · ${escapeHtml(r['FORM TYPE'])} · ${escapeHtml(r['BRAND'])}</span>
-            <span class="score-pill ${passed ? 'pass-pill' : 'fail-pill'}">${score === null ? '-' : score + '%'}</span>
-        </div>
-        <div class="audit-meta">Team Leader: ${escapeHtml(r['TEAM LEADER']) || '—'} · Cluster: ${escapeHtml(r['CLUSTER']) || '—'} · Month: ${escapeHtml(r['MONTH']) || '—'}${r['CALL ID / CASE NUMBER'] ? ` · ${normVal(r['BRAND']) === 'SMART EBG' ? 'Call ID' : 'Case #'}: ${escapeHtml(r['CALL ID / CASE NUMBER'])}` : ''}${r['MIN'] ? ` · ANI: ${escapeHtml(r['MIN'])}` : ''}</div>
-        <div>${tagsHtml}</div>
-        ${commentsHtml}
-    </div>`;
-};
+        return `<div class="audit-row">
+            <div class="audit-head">
+                <span>${escapeHtml(r['WEEKENDING'])} · ${escapeHtml(r['FORM TYPE'])} · ${escapeHtml(r['BRAND'])}</span>
+                <span class="score-pill ${passed ? 'pass-pill' : 'fail-pill'}">${score === null ? '-' : score + '%'}</span>
+            </div>
+            <div class="audit-meta">Team Leader: ${escapeHtml(r['TEAM LEADER']) || '—'} · Cluster: ${escapeHtml(r['CLUSTER']) || '—'} · Month: ${escapeHtml(r['MONTH']) || '—'}${r['CALL ID / CASE NUMBER'] ? ` · ${normVal(r['BRAND']) === 'SMART EBG' ? 'Call ID' : 'Case #'}: ${escapeHtml(r['CALL ID / CASE NUMBER'])}` : ''}${r['MIN'] ? ` · ANI: ${escapeHtml(r['MIN'])}` : ''}</div>
+            <div>${tagsHtml}</div>
+            ${commentsHtml}
+        </div>`;
+    };
 
     const groups = {};
     sorted.forEach(r => {
@@ -1209,7 +1184,7 @@ const auditRowHtml = (r) => {
     document.getElementById('agentAuditList').innerHTML = orderedMonths.map((month, idx) => {
         const rows = groups[month];
         const monthAvg = (() => {
-            const vals = rows.map(r => r['OVERALL SCORE']).filter(v => v !== null && v !== undefined && !isNaN(v));
+            const vals = rows.map(r => parseScore(r['OVERALL SCORE'])).filter(v => v !== null);
             return vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
         })();
         return `<details class="month-group" ${idx === 0 ? 'open' : ''}>
@@ -1242,8 +1217,6 @@ window.resyncAgentEmails = resyncAgentEmails;
    ========================================================================== */
 setSignupRole('agent');
 
-// Pre-fill login email if arriving via a deep link (e.g. from the Agent
-// Documentation Suite's "View Full History" button): ?email=name@domain
 (function prefillLoginEmailFromUrl() {
     const params = new URLSearchParams(window.location.search);
     const email = params.get('email');
