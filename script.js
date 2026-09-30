@@ -1,21 +1,21 @@
 /* ==========================================================================
    FIREBASE
    ========================================================================== */
-import { auth, db } from './firebase-config.js';
-import {
-    createUserWithEmailAndPassword,
-    signInWithEmailAndPassword,
-    signOut,
-    deleteUser,
-    onAuthStateChanged
-} from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
+import { db } from './firebase-config.js';
 import {
     doc, getDoc, setDoc, deleteDoc,
     collection, query, where, getDocs, writeBatch
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
-const TEAM_LEADER_INVITE_CODE = 'SMART-TL-2026';
-const QUALITY_INVITE_CODE = 'SMART-QA-2026';
+// Maps roster Position values to app roles (same convention as the PLDT site).
+// If the roster file has no Position column, everyone defaults to 'agent' —
+// upload a roster with a Position column to get Quality / Team Leader access.
+function positionToRole(position) {
+    const p = String(position || '').trim();
+    if (/qa apprentice|qa sup|qa-data scrubber|quality analyst|quality manager|quality/i.test(p)) return 'quality';
+    if (/supervisor|tl apprentice|team leader|sr\.\s*supervisor|trainer|trainer apprentice|training supervisor/i.test(p)) return 'team_leader';
+    return 'agent';
+}
 
 /* Robust score parser that safely converts strings, percentages, and fractions into 0-100 values */
 function parseScore(val) {
@@ -26,6 +26,12 @@ function parseScore(val) {
     let n = parseFloat(s);
     if (isNaN(n)) return null;
     return n <= 1 ? n * 100 : n;
+}
+
+let lobChartInstance = null;
+
+function normalizeEmployeeId(value) {
+    return String(value || '').trim().replace(/\.0$/, '').replace(/\s+/g, '');
 }
 
 /* Firestore write batches max out at 500 ops — chunk anything bigger */
@@ -81,190 +87,126 @@ async function replaceAuditData(rows) {
 let currentSession = null;
 
 /* ==========================================================================
-   AUTH UI
+   AUTH (Roster-based — no Firebase Auth account creation)
    ========================================================================== */
-function switchAuthTab(which) {
-    document.getElementById('tabLogin').classList.toggle('active', which === 'login');
-    document.getElementById('tabSignup').classList.toggle('active', which === 'signup');
-    document.getElementById('loginPane').style.display = which === 'login' ? 'block' : 'none';
-    document.getElementById('signupPane').style.display = which === 'signup' ? 'block' : 'none';
-}
-
-let signupRole = 'agent';
-function setSignupRole(role) {
-    signupRole = role;
-    document.getElementById('roleAgentLabel').classList.toggle('checked', role === 'agent');
-    document.getElementById('roleTeamLeaderLabel').classList.toggle('checked', role === 'team_leader');
-    document.getElementById('roleQualityLabel').classList.toggle('checked', role === 'quality');
-    const needsCode = role === 'team_leader' || role === 'quality';
-    document.getElementById('supervisorCodeGroup').style.display = needsCode ? 'block' : 'none';
-    if (needsCode) {
-        document.getElementById('supervisorCodeLabel').textContent = role === 'team_leader' ? 'Team Leader Invite Code' : 'Quality Invite Code';
-    }
-}
-
 function showAuthMsg(elId, text, ok) {
     const el = document.getElementById(elId);
+    if (!el) return;
     el.textContent = text;
     el.className = 'auth-msg ' + (ok ? 'ok' : 'error');
 }
 
-let authFlowInProgress = false;
-const REQUIRED_EMAIL_DOMAIN = '@supplier.smart.com.ph';
-
-const EMAIL_DOMAIN_EXCEPTIONS = new Set([
-    't-jtagores@pldt.com.ph'
-]);
-
-async function handleSignup() {
-    const email = document.getElementById('signupEmail').value.trim().toLowerCase();
-    const pw = document.getElementById('signupPassword').value;
-    const pw2 = document.getElementById('signupPassword2').value;
-
-    if (!email || !email.includes('@')) return showAuthMsg('signupMsg', 'Enter a valid work email.', false);
-    if (!email.endsWith(REQUIRED_EMAIL_DOMAIN) && !EMAIL_DOMAIN_EXCEPTIONS.has(email)) return showAuthMsg('signupMsg', `Please sign up using your ${REQUIRED_EMAIL_DOMAIN} work email.`, false);
-    if (pw.length < 6) return showAuthMsg('signupMsg', 'Password must be at least 6 characters.', false);
-    if (pw !== pw2) return showAuthMsg('signupMsg', 'Passwords do not match.', false);
-
-    authFlowInProgress = true;
-    try {
-        if (signupRole === 'team_leader' || signupRole === 'quality') {
-            const requiredCode = signupRole === 'team_leader' ? TEAM_LEADER_INVITE_CODE : QUALITY_INVITE_CODE;
-            const code = document.getElementById('supervisorCode').value.trim();
-            if (code !== requiredCode) return showAuthMsg('signupMsg', 'Invalid invite code.', false);
-
-            let cred;
-            try {
-                cred = await createUserWithEmailAndPassword(auth, email, pw);
-            } catch (err) {
-                return showAuthMsg('signupMsg', friendlyAuthError(err), false);
-            }
-            await setDoc(doc(db, 'users', cred.user.uid), { email, role: signupRole });
-            await signOut(auth);
-            showAuthMsg('signupMsg', `${signupRole === 'team_leader' ? 'Team Leader' : 'Quality'} account created. You can log in now.`, true);
-            clearSignupForm();
-            setTimeout(() => switchAuthTab('login'), 1200);
-            return;
-        }
-
-        let cred;
-        try {
-            cred = await createUserWithEmailAndPassword(auth, email, pw);
-        } catch (err) {
-            return showAuthMsg('signupMsg', friendlyAuthError(err), false);
-        }
-
-        try {
-            const rosterSnap = await getDoc(doc(db, 'roster', email));
-            if (!rosterSnap.exists()) {
-                await deleteUser(cred.user);
-                return showAuthMsg('signupMsg', 'This email was not found on the agent roster. Ask your supervisor to add you, then try again.', false);
-            }
-            const match = rosterSnap.data();
-
-            await setDoc(doc(db, 'users', cred.user.uid), {
-                email,
-                role: 'agent',
-                agentName: match.agentName,
-                agentId: match.agentId || ''
-            });
-            await signOut(auth);
-            showAuthMsg('signupMsg', `Account created and matched to "${match.agentName}". You can log in now.`, true);
-            clearSignupForm();
-            setTimeout(() => switchAuthTab('login'), 1200);
-        } catch (err) {
-            try { await deleteUser(cred.user); } catch (e2) {}
-            showAuthMsg('signupMsg', friendlyAuthError(err), false);
-        }
-    } finally {
-        authFlowInProgress = false;
-    }
-}
-
-function clearSignupForm() {
-    document.getElementById('signupEmail').value = '';
-    document.getElementById('signupPassword').value = '';
-    document.getElementById('signupPassword2').value = '';
-    const codeEl = document.getElementById('supervisorCode');
-    if (codeEl) codeEl.value = '';
-}
-
+// Agents log in with their SMART domain (e.g. t-jrarsaga or the full
+// t-jrarsaga@supplier.smart.com.ph) as the username and their Win ID as the
+// password. There is no separate sign-up step — the roster your supervisor
+// uploads IS the source of truth, matched by Win ID.
 async function handleLogin() {
-    const email = document.getElementById('loginEmail').value.trim().toLowerCase();
-    const pw = document.getElementById('loginPassword').value;
-    if (!email || !pw) return showAuthMsg('loginMsg', 'Enter your email and password.', false);
+    const emailEl = document.getElementById('loginEmail');
+    const pwEl = document.getElementById('loginPassword');
+    const rawInput = emailEl ? emailEl.value.trim().toLowerCase() : '';
+    const winId = pwEl ? pwEl.value.trim().replace(/\.0$/, '') : '';
 
-    authFlowInProgress = true;
+    if (!rawInput || !winId) return showAuthMsg('loginMsg', 'Enter your SMART domain and Win ID.', false);
+
+    const username = rawInput.split('@')[0];
+    const email = username + '@supplier.smart.com.ph';
+
+    showAuthMsg('loginMsg', 'Checking credentials…', false);
+
     try {
-        const cred = await signInWithEmailAndPassword(auth, email, pw);
-        const profileSnap = await getDoc(doc(db, 'users', cred.user.uid));
-        if (!profileSnap.exists()) {
-            await signOut(auth);
-            return showAuthMsg('loginMsg', 'No profile found for this account. Contact your supervisor.', false);
+        let match = null;
+
+        // 1. Current roster format: doc id is 'winid_<winId>'
+        const byWinId = await getDoc(doc(db, 'roster', 'winid_' + winId));
+        if (byWinId.exists()) {
+            match = byWinId.data();
+            const storedUsername = String(match.email || '').split('@')[0].toLowerCase();
+            if (storedUsername && storedUsername !== username) {
+                return showAuthMsg('loginMsg', 'Domain does not match this Win ID. Please check your credentials.', false);
+            }
         }
-        currentSession = { uid: cred.user.uid, ...profileSnap.data() };
-        document.getElementById('loginEmail').value = '';
-        document.getElementById('loginPassword').value = '';
+
+        // 2. Fall back to legacy roster format: doc id is the email itself
+        if (!match) {
+            const byEmail = await getDoc(doc(db, 'roster', email));
+            if (byEmail.exists()) {
+                const d = byEmail.data();
+                if (normalizeEmployeeId(d.agentId) !== winId) {
+                    return showAuthMsg('loginMsg', 'Incorrect Win ID. Please check and try again.', false);
+                }
+                match = d;
+            }
+        }
+
+        if (!match) {
+            return showAuthMsg('loginMsg', 'Credentials not found on the roster. Ask your supervisor to upload the latest roster.', false);
+        }
+
+        const role = match.position ? positionToRole(match.position) : 'agent';
+
+        currentSession = {
+            email: String(match.email || email).toLowerCase(),
+            role,
+            agentName: match.agentName || '',
+            agentId: winId
+        };
+
+        try { sessionStorage.setItem('smart_session', JSON.stringify(currentSession)); } catch (e) {}
+        if (emailEl) emailEl.value = '';
+        if (pwEl) pwEl.value = '';
         await enterApp();
     } catch (err) {
-        showAuthMsg('loginMsg', friendlyAuthError(err), false);
-    } finally {
-        authFlowInProgress = false;
+        console.error('Login error:', err);
+        if (String(err.code || err.message || '').includes('permission')) {
+            return showAuthMsg('loginMsg', 'Permission denied. Check Firestore Rules in Firebase Console.', false);
+        }
+        showAuthMsg('loginMsg', 'Login failed: ' + (err.message || 'Please try again.'), false);
     }
 }
 
 function logout() {
-    signOut(auth);
-}
-
-function friendlyAuthError(err) {
-    const code = err && err.code ? err.code : '';
-    if (code.includes('email-already-in-use')) return 'An account with this email already exists. Try logging in.';
-    if (code.includes('invalid-credential') || code.includes('wrong-password') || code.includes('user-not-found')) return 'Incorrect email or password.';
-    if (code.includes('weak-password')) return 'Password must be at least 6 characters.';
-    if (code.includes('invalid-email')) return 'Enter a valid email address.';
-    return 'Something went wrong: ' + (err && err.message ? err.message : 'please try again.');
+    currentSession = null;
+    cachedAuditRows = [];
+    try { sessionStorage.removeItem('smart_session'); } catch (e) {}
+    resetToLoggedOutState();
 }
 
 function resetToLoggedOutState() {
     currentSession = null;
     cachedAuditRows = [];
-    document.getElementById('appScreen').style.display = 'none';
-    document.getElementById('authScreen').style.display = 'flex';
-    document.getElementById('sessionChip').style.display = 'none';
-    document.getElementById('switchSiteBtn').style.display = 'none';
-    document.getElementById('myTeamCard').style.display = 'none';
-    document.getElementById('loginEmail').value = '';
-    document.getElementById('loginPassword').value = '';
-    document.getElementById('loginMsg').className = 'auth-msg';
-    clearSignupForm();
-    switchAuthTab('login');
+    const appScreen = document.getElementById('appScreen');
+    const authScreen = document.getElementById('authScreen');
+    const sessionChip = document.getElementById('sessionChip');
+    const switchSiteBtn = document.getElementById('switchSiteBtn');
+    const myTeamCard = document.getElementById('myTeamCard');
+    if (appScreen) appScreen.style.display = 'none';
+    if (authScreen) authScreen.style.display = 'flex';
+    if (sessionChip) sessionChip.style.display = 'none';
+    if (switchSiteBtn) switchSiteBtn.style.display = 'none';
+    if (myTeamCard) myTeamCard.style.display = 'none';
 
-    document.getElementById('agentAuditList').innerHTML = '';
-    document.getElementById('agentScorecard').innerHTML = '';
-    document.getElementById('agentWelcomeName').textContent = 'Welcome';
-    document.getElementById('rosterStatus').textContent = 'No roster loaded yet.';
-    document.getElementById('dataStatus').textContent = 'No audit data loaded yet.';
-    document.getElementById('resyncStatus').textContent = 'Use this if agents uploaded/updated after data was already loaded, or if an agent can\u2019t see rows that should be theirs.';
-    document.getElementById('uploadPopover').style.display = 'none';
+    const loginEmailEl = document.getElementById('loginEmail');
+    const loginPasswordEl = document.getElementById('loginPassword');
+    const loginMsgEl = document.getElementById('loginMsg');
+    if (loginEmailEl) loginEmailEl.value = '';
+    if (loginPasswordEl) loginPasswordEl.value = '';
+    if (loginMsgEl) loginMsgEl.className = 'auth-msg';
 }
 
-onAuthStateChanged(auth, async (user) => {
-    if (authFlowInProgress) return;
-
-    if (!user) {
+// Restore session from sessionStorage on page load (survives refresh, not tab close)
+(function restoreSession() {
+    try {
+        const saved = sessionStorage.getItem('smart_session');
+        if (saved) {
+            currentSession = JSON.parse(saved);
+            window.addEventListener('DOMContentLoaded', () => enterApp());
+        } else {
+            resetToLoggedOutState();
+        }
+    } catch (e) {
         resetToLoggedOutState();
-        return;
     }
-
-    const profileSnap = await getDoc(doc(db, 'users', user.uid));
-    if (!profileSnap.exists()) {
-        await signOut(auth);
-        return;
-    }
-    currentSession = { uid: user.uid, ...profileSnap.data() };
-    await enterApp();
-});
+})();
 
 async function enterApp() {
     document.getElementById('authScreen').style.display = 'none';
@@ -272,8 +214,7 @@ async function enterApp() {
     document.getElementById('sessionChip').style.display = 'flex';
 
     const roleLabels = { quality: '👤 Quality · ', team_leader: '👤 Team Leader · ', supervisor: '👤 Quality · ', agent: '👤 Agent · ' };
-    const SUPERVISOR_EMAILS = new Set(['t-jtagores@pldt.com.ph']);
-    const roleLabel = SUPERVISOR_EMAILS.has(currentSession.email) ? '👤 Quality Supervisor · ' : (roleLabels[currentSession.role] || '👤 ');
+    const roleLabel = roleLabels[currentSession.role] || '👤 ';
     document.getElementById('sessionLabel').textContent = roleLabel + currentSession.email;
 
     const canViewDashboard = currentSession.role === 'quality' || currentSession.role === 'team_leader' || currentSession.role === 'supervisor';
@@ -306,7 +247,7 @@ async function enterApp() {
 async function renderMyTeamPanel(rows) {
     const card = document.getElementById('myTeamCard');
     try {
-        const rosterSnap = await getDoc(doc(db, 'roster', currentSession.email));
+        const rosterSnap = await getDoc(doc(db, 'roster', 'winid_' + currentSession.agentId));
         const myName = rosterSnap.exists() ? rosterSnap.data().agentName : '';
         if (!myName) {
             card.style.display = 'none';
@@ -379,7 +320,7 @@ const HIT_PARAMS = [
     { col: 'DID WE FOLLOW THE SYSTEM DOCUMENTATION PROCESS?', category: 'Safe & Secure', label: 'System documentation process missed', type: 'descriptive' },
     { col: 'DID WE FOLLOW THE SYSTEM TAGGING PROCESS?', category: 'Safe & Secure', label: 'System tagging process missed', type: 'descriptive' },
     { col: 'DID WE FOLLOW CORRECT GRAMMAR, TECHNICAL WRITING & THE PRESCRIBED LANGUAGE?', category: 'Safe & Secure', label: 'Grammar / prescribed language standard missed', type: 'descriptive' },
-    { col: "IS THIS A POTENTIAL CUSTOMER MISTREAT?", category: 'Mistreat', label: 'Potential customer mistreat flagged', type: 'boolean', hitValue: 'YES' }
+    { col: "IS THIS A POTENTIAL CUSTOMER MISTREAT?", category: 'Mistreat', label: 'Potential customer mistreat flagged', type: 'descriptive' }
 ];
 
 function escapeHtml(str) {
@@ -497,6 +438,13 @@ function findHeader(row, candidates) {
 /* ==========================================================================
    ROSTER UPLOAD
    ========================================================================== */
+function rosterDocId(entry) {
+    // Win ID is what agents type at login, so keying roster docs by it makes
+    // login a simple direct lookup instead of a query.
+    if (entry.agentId) return 'winid_' + normalizeEmployeeId(entry.agentId);
+    return 'name_' + normalizeName(entry.agentName).replace(/\s+/g, '_').toLowerCase();
+}
+
 async function handleRosterUpload(event) {
     const file = event.target.files[0];
     if (!file) return;
@@ -508,8 +456,9 @@ async function handleRosterUpload(event) {
 
         const emailKey = findHeader(rows[0], ['Email', 'Work Email', 'PLDT/SMART Domain v2', 'PLDT/SMART Domain']);
         const nameKey = findHeader(rows[0], ['Agent Name', 'AGENT/OFFICER NAME', 'Employee Name', 'Name']);
-        const idKey = findHeader(rows[0], ['ID', 'Employee ID', 'EE number/ID number', 'Agent ID', 'Win ID']);
+        const idKey = findHeader(rows[0], ['Win ID', 'Winid', 'WIN ID', 'ID', 'Employee ID', 'EE number/ID number', 'Agent ID']);
         const teamLeaderKey = findHeader(rows[0], ['Supervisor Name', 'Team Leader', 'TEAM LEADER']);
+        const positionKey = findHeader(rows[0], ['Position', 'Designation', 'Job Title', 'Role', 'Title']);
 
         if (!emailKey || !nameKey) throw new Error('missing columns');
 
@@ -517,28 +466,34 @@ async function handleRosterUpload(event) {
             .map(r => ({
                 email: String(r[emailKey] || '').trim().toLowerCase(),
                 agentName: String(r[nameKey] || '').trim(),
-                agentId: idKey ? String(r[idKey] || '').trim() : '',
-                teamLeader: teamLeaderKey ? String(r[teamLeaderKey] || '').trim() : ''
+                agentId: idKey ? normalizeEmployeeId(String(r[idKey] || '')) : '',
+                teamLeader: teamLeaderKey ? String(r[teamLeaderKey] || '').trim() : '',
+                position: positionKey ? String(r[positionKey] || '').trim() : ''
             }))
             .filter(r => r.email && r.agentName);
         const roster = allNamed.filter(r => r.email.endsWith('@supplier.smart.com.ph'));
         const skippedOtherDomain = allNamed.length - roster.length;
         const withTeamLeader = roster.filter(r => r.teamLeader).length;
+        const missingWinId = roster.filter(r => !r.agentId).length;
 
         await clearCollection('roster');
-        await batchWriteDocs('roster', roster, (r) => r.email);
+        await batchWriteDocs('roster', roster, rosterDocId);
         await resyncAgentEmails();
 
         let rosterMsg = `✅ Roster loaded: ${roster.length} agents matched to emails. 🔄 Existing audit data auto-synced to match.`;
         rosterMsg += teamLeaderKey
             ? ` Team Leader column found ("${teamLeaderKey}") — ${withTeamLeader}/${roster.length} agents have a Team Leader assigned.`
             : ` ⚠️ No Team Leader column detected in this file (looked for "Supervisor Name", "Team Leader", or "TEAM LEADER") — Team Leader will show as Unassigned until this is fixed.`;
+        rosterMsg += positionKey
+            ? ` Position column found ("${positionKey}") — used to grant Quality/Team Leader dashboard access.`
+            : ` ⚠️ No Position column detected — everyone will log in as Agent until a Position column is added.`;
         if (skippedOtherDomain > 0) rosterMsg += ` (${skippedOtherDomain} skipped — not on @supplier.smart.com.ph)`;
+        if (missingWinId > 0) rosterMsg += ` ⚠️ ${missingWinId} agent(s) have no Win ID and won't be able to log in.`;
         document.getElementById('rosterStatus').innerHTML = rosterMsg;
     } catch (err) {
         console.error(err);
         document.getElementById('rosterStatus').innerHTML =
-            `⚠️ Could not read roster. Expect columns: Email, Agent Name, ID.`;
+            `⚠️ Could not read roster. Expect columns: Email, Agent Name, Win ID.`;
     }
 }
 
@@ -929,130 +884,168 @@ function filterData() {
 
 function tenureBucket(tenureStr) {
     const t = normVal(tenureStr);
-    if (t.includes('0-30')) return 'b1';
-    if (t.includes('31-60') || t.includes('61-90') || t.includes('31-90')) return 'b2';
-    return 'b3';
+    if (t.includes('NCIP')) return 'ncip';
+    if (t.includes('NHIP')) return 'nhip';
+    if (t.includes('0-30')) return 'd0';
+    if (t.includes('31-60')) return 'd31';
+    if (t.includes('61-90')) return 'd61';
+    if (t.includes('>91') || t.includes('91')) return 'd91';
+    return 'other';
 }
 
-function renderSupervisorDashboard(data) {
-    if (!data.length) {
-        document.getElementById('totalPassRateVal').textContent = '-';
-        document.getElementById('totalFailRateVal').textContent = '-';
-        document.getElementById('cmSuperstarVal').textContent = '-';
-        document.getElementById('cmPerformerVal').textContent = '-';
-        document.getElementById('cmLaggardVal').textContent = '-';
-        document.getElementById('cmUnderperformerVal').textContent = '-';
-        document.getElementById('leaderChart').innerHTML = '<div class="empty-note">No matching data.</div>';
-        document.getElementById('parameterChart').innerHTML = '<div class="empty-note">No matching data.</div>';
-        document.getElementById('topHitsTable').querySelector('tbody').innerHTML = '<tr><td colspan="3" class="empty-note">No matching data.</td></tr>';
+/* ==========================================================================
+   SCORE PER LOB — Chart.js grouped bar chart
+   ========================================================================== */
+function renderGroupedBarChart(data) {
+    const canvas = document.getElementById('lobChartCanvas');
+    if (!canvas) return;
+
+    const groups = {};
+    data.forEach(r => {
+        const lob = r['BRAND'] || 'Unspecified';
+        if (!groups[lob]) groups[lob] = { reliable: [], personable: [], fast: [], safe: [], overall: [] };
+        const rel = parseScore(r['RELIABLE']); if (rel !== null) groups[lob].reliable.push(rel);
+        const per = parseScore(r['PERSONABLE']); if (per !== null) groups[lob].personable.push(per);
+        const fst = parseScore(r['FAST']); if (fst !== null) groups[lob].fast.push(fst);
+        const saf = parseScore(r['SAFE & SECURE']); if (saf !== null) groups[lob].safe.push(saf);
+        const ovr = parseScore(r['OVERALL SCORE']); if (ovr !== null) groups[lob].overall.push(ovr);
+    });
+
+    const labels = Object.keys(groups).sort();
+    const getAvg = (arr) => arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : 0;
+
+    if (lobChartInstance) lobChartInstance.destroy();
+
+    lobChartInstance = new Chart(canvas.getContext('2d'), {
+        type: 'bar',
+        data: {
+            labels,
+            datasets: [
+                { label: 'Reliable', data: labels.map(l => getAvg(groups[l].reliable)), backgroundColor: '#EF9A9A' },
+                { label: 'Personable', data: labels.map(l => getAvg(groups[l].personable)), backgroundColor: '#E57373' },
+                { label: 'Fast', data: labels.map(l => getAvg(groups[l].fast)), backgroundColor: '#E53935' },
+                { label: 'Safe & Secure', data: labels.map(l => getAvg(groups[l].safe)), backgroundColor: '#C62828' },
+                { label: 'Overall Score', data: labels.map(l => getAvg(groups[l].overall)), backgroundColor: '#7F0000' }
+            ]
+        },
+        plugins: [ChartDataLabels],
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            layout: { padding: { top: 20, bottom: 10 } },
+            plugins: {
+                legend: {
+                    position: 'top',
+                    labels: { usePointStyle: true, pointStyle: 'rect', padding: 15, font: { size: 10, weight: 'bold' } }
+                },
+                datalabels: {
+                    anchor: 'end', align: 'top', offset: 2,
+                    formatter: (val) => val ? val + '%' : '',
+                    font: { size: 8, weight: 'bold' }, color: '#333'
+                }
+            },
+            scales: {
+                y: { display: false, max: 115 },
+                x: {
+                    grid: { display: false },
+                    ticks: { font: { size: 9, weight: '600' }, color: '#333', maxRotation: 45, minRotation: 0, autoSkip: false }
+                }
+            }
+        }
+    });
+}
+
+/* ==========================================================================
+   PER-LOB SUMMARY TABLES (Pass Rate / Audit Count / Avg Score by Tenure)
+   ========================================================================== */
+function renderSummaryTables(data) {
+    const passBody = document.getElementById('passRateSummaryBody');
+    const auditBody = document.getElementById('auditCountSummaryBody');
+    const avgBody = document.getElementById('averageScoreSummaryBody');
+
+    if (!data || !data.length) {
+        if (passBody) passBody.innerHTML = '<tr><td colspan="4" class="empty-note">Upload data to populate.</td></tr>';
+        if (auditBody) auditBody.innerHTML = '<tr><td colspan="8" class="empty-note">Upload data to populate.</td></tr>';
+        if (avgBody) avgBody.innerHTML = '<tr><td colspan="8" class="empty-note">Upload data to populate.</td></tr>';
         return;
     }
 
-    const avg = (key) => {
-        const vals = data.map(r => parseScore(r[key])).filter(v => v !== null);
-        if (!vals.length) return null;
-        return Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
-    };
-
-    const avgOverall = avg('OVERALL SCORE');
-
-    /* ==========================================================================
-       GROUPED BAR CHART
-       ========================================================================== */
-    const categories = [
-        { key: 'RELIABLE', label: 'Reliable', color: '#b2d8be' },
-        { key: 'PERSONABLE', label: 'Personable', color: '#6fb88a' },
-        { key: 'FAST', label: 'Fast', color: '#28884d' },
-        { key: 'SAFE & SECURE', label: 'Safe & Secure', color: '#0f6130' },
-        { key: 'OVERALL SCORE', label: 'Overall Score', color: '#063b1b' }
-    ];
-
-    const lobData = {};
-    data.forEach(r => {
-        const lob = r['BRAND'] || 'Unspecified';
-        if (!lobData[lob]) {
-            lobData[lob] = { RELIABLE: [], PERSONABLE: [], FAST: [], 'SAFE & SECURE': [], 'OVERALL SCORE': [] };
-        }
-        categories.forEach(c => {
-            const val = parseScore(r[c.key]);
-            if (val !== null) {
-                lobData[lob][c.key].push(val);
-            }
-        });
-    });
-
-    const lobNames = Object.keys(lobData).sort();
-    const parameterChart = document.getElementById('parameterChart');
-
-    if (lobNames.length) {
-        const legendHtml = `<div class="chart-legend">
-            ${categories.map(c => `
-                <div class="legend-item">
-                    <span class="legend-color" style="background:${c.color};"></span>
-                    <span>${c.label}</span>
-                </div>
-            `).join('')}
-        </div>`;
-
-        const groupsHtml = lobNames.map(lob => {
-            const barsHtml = categories.map(c => {
-                const arr = lobData[lob][c.key];
-                const score = arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : 0;
-                return `<div class="bar-wrapper">
-                    <div class="bar-tooltip">
-                        <div class="bar-tooltip-title">${escapeHtml(lob)}</div>
-                        <div class="bar-tooltip-content">
-                            <span class="bar-tooltip-badge" style="background:${c.color};"></span>
-                            <span>${c.label}: ${score}%</span>
-                        </div>
-                    </div>
-                    <div class="bar-value">${score}%</div>
-                    <div class="bar" style="background:${c.color}; height:${score}%;"></div>
-                </div>`;
-            }).join('');
-
-            return `<div class="bar-group-wrapper">
-                <div class="bar-group">${barsHtml}</div>
-                <div class="bar-group-label" title="${escapeHtml(lob)}">${escapeHtml(lob)}</div>
-            </div>`;
-        }).join('');
-
-        parameterChart.innerHTML = legendHtml + `<div class="grouped-chart-container">${groupsHtml}</div>`;
-    } else {
-        parameterChart.innerHTML = '<div class="empty-note">No matching data.</div>';
-    }
-
     const isPassed = (r) => r['OVERALL PASSRATE'] ? r['OVERALL PASSRATE'] === 'PASSED' : (parseScore(r['OVERALL SCORE']) || 0) > 90;
-    const passed = data.filter(isPassed).length;
-    const passPct = Math.round((passed / data.length) * 100);
-    document.getElementById('totalPassRateVal').textContent = passPct + '%';
-    document.getElementById('totalFailRateVal').textContent = (100 - passPct) + '%';
+    const BUCKETS = ['ncip', 'nhip', 'd0', 'd31', 'd61', 'd91'];
 
-    const buckets = { b1: [], b2: [], b3: [] };
-    data.forEach(r => buckets[tenureBucket(r['AGENT TENURE'])].push(r));
-    const bucketAvg = (arr) => {
+    function bucketRows(rows) {
+        const b = { ncip: [], nhip: [], d0: [], d31: [], d61: [], d91: [] };
+        rows.forEach(r => { const k = tenureBucket(r['AGENT TENURE']); if (b[k]) b[k].push(r); });
+        return b;
+    }
+    function countCell(arr) { return arr.length > 0 ? arr.length : '-'; }
+    function avgScore(arr) {
         const vals = arr.map(r => parseScore(r['OVERALL SCORE'])).filter(v => v !== null);
         return vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) + '%' : '-';
-    };
-    document.getElementById('totalAuditNhip').textContent = buckets.b1.length || '-';
-    document.getElementById('totalAudit31').textContent = buckets.b2.length || '-';
-    document.getElementById('totalAudit91').textContent = buckets.b3.length || '-';
-    document.getElementById('totalAuditTotal').textContent = data.length;
-    document.getElementById('totalAvgNhip').textContent = bucketAvg(buckets.b1);
-    document.getElementById('totalAvg31').textContent = bucketAvg(buckets.b2);
-    document.getElementById('totalAvg91').textContent = bucketAvg(buckets.b3);
-    document.getElementById('totalAvgTotal').textContent = avgOverall === null ? '-' : avgOverall + '%';
+    }
 
-    // CM Distribution
+    const lobMap = {};
+    data.forEach(r => {
+        const lob = r['BRAND'] || 'Unspecified';
+        if (!lobMap[lob]) lobMap[lob] = [];
+        lobMap[lob].push(r);
+    });
+    const lobs = Object.keys(lobMap).sort();
+
+    if (passBody) {
+        const lobRows = lobs.map(lob => {
+            const rows = lobMap[lob];
+            const passed = rows.filter(isPassed).length;
+            const pct = Math.round(passed / rows.length * 100);
+            return `<tr><td style="text-align:left;">${escapeHtml(lob)}</td><td>${pct}%</td><td>${100 - pct}%</td><td>100%</td></tr>`;
+        }).join('');
+        const totalPassed = data.filter(isPassed).length;
+        const totalPct = Math.round(totalPassed / data.length * 100);
+        passBody.innerHTML = lobRows + `<tr class="total-row"><td style="text-align:left;">Grand Total</td><td>${totalPct}%</td><td>${100 - totalPct}%</td><td>100%</td></tr>`;
+    }
+
+    if (auditBody) {
+        const lobRows = lobs.map(lob => {
+            const b = bucketRows(lobMap[lob]);
+            return `<tr><td style="text-align:left;">${escapeHtml(lob)}</td>${BUCKETS.map(k => `<td>${countCell(b[k])}</td>`).join('')}<td>${lobMap[lob].length}</td></tr>`;
+        }).join('');
+        const totalB = bucketRows(data);
+        auditBody.innerHTML = lobRows + `<tr class="total-row"><td style="text-align:left;">Grand Total</td>${BUCKETS.map(k => `<td>${countCell(totalB[k])}</td>`).join('')}<td>${data.length}</td></tr>`;
+    }
+
+    if (avgBody) {
+        const lobRows = lobs.map(lob => {
+            const b = bucketRows(lobMap[lob]);
+            return `<tr><td style="text-align:left;">${escapeHtml(lob)}</td>${BUCKETS.map(k => `<td>${avgScore(b[k])}</td>`).join('')}<td>${avgScore(lobMap[lob])}</td></tr>`;
+        }).join('');
+        const totalB = bucketRows(data);
+        avgBody.innerHTML = lobRows + `<tr class="total-row"><td style="text-align:left;">Grand Total</td>${BUCKETS.map(k => `<td>${avgScore(totalB[k])}</td>`).join('')}<td>${avgScore(data)}</td></tr>`;
+    }
+}
+
+function renderSupervisorDashboard(data) {
+    renderSummaryTables(data);
+
+    if (!data.length) {
+        document.getElementById('cmSuperstarVal').textContent = '-';
+        document.getElementById('cmUnderperformerVal').textContent = '-';
+        document.getElementById('leaderChart').innerHTML = '<div class="empty-note">No matching data.</div>';
+        document.getElementById('topHitsTable').querySelector('tbody').innerHTML = '<tr><td colspan="3" class="empty-note">No matching data.</td></tr>';
+        if (lobChartInstance) { lobChartInstance.destroy(); lobChartInstance = null; }
+        return;
+    }
+
+    renderGroupedBarChart(data);
+
+    // CM Distribution (Superstar vs everything else, matching the reference's 2-column view)
     const cmRows = data.filter(r => r['CM']);
-    const cmIds = { SUPERSTAR: 'cmSuperstarVal', PERFORMER: 'cmPerformerVal', LAGGARD: 'cmLaggardVal', UNDERPERFORMER: 'cmUnderperformerVal' };
     if (cmRows.length) {
-        Object.entries(cmIds).forEach(([tier, elId]) => {
-            const count = cmRows.filter(r => r['CM'] === tier).length;
-            document.getElementById(elId).textContent = Math.round((count / cmRows.length) * 100) + '%';
-        });
+        const superstar = cmRows.filter(r => r['CM'] === 'SUPERSTAR').length;
+        document.getElementById('cmSuperstarVal').textContent = Math.round((superstar / cmRows.length) * 100) + '%';
+        document.getElementById('cmUnderperformerVal').textContent = Math.round(((cmRows.length - superstar) / cmRows.length) * 100) + '%';
     } else {
-        Object.values(cmIds).forEach(elId => { document.getElementById(elId).textContent = '-'; });
+        document.getElementById('cmSuperstarVal').textContent = '-';
+        document.getElementById('cmUnderperformerVal').textContent = '-';
     }
 
     // Team leader chart
@@ -1085,7 +1078,7 @@ function renderSupervisorDashboard(data) {
     tbody.innerHTML = sortedHits.length
         ? sortedHits.map(([key, count]) => {
             const [label, category] = key.split('||');
-            return `<tr><td style="text-align:left;">${label}</td><td>${category}</td><td>${count}</td></tr>`;
+            return `<tr><td style="text-align:left;">${escapeHtml(label)}</td><td>${escapeHtml(category)}</td><td>${count}</td></tr>`;
         }).join('')
         : '<tr><td colspan="3" class="empty-note">No parameters flagged in this selection.</td></tr>';
 }
@@ -1136,18 +1129,18 @@ async function renderAgentView() {
             : `<span class="no-issues-note">✓ No parameters flagged on this audit.</span>`;
 
         const commentFields = [
-            { key: 'RELIABLE: ADDITIONAL COMMENTS', label: 'Reliable Comments' },
-            { key: 'PERSONABLE: ADDITIONAL COMMENTS', label: 'Personable Comments' },
-            { key: 'FAST: ADDITIONAL COMMENTS', label: 'Fast Comments' },
-            { key: 'OTHER FACTORS REMARKS', label: 'Other Factors Remarks' },
-            { key: 'WHAT MATTERS TO THE BUSINESS REMARKS', label: 'What Matters to the Business Remarks' }
+            { key: 'RELIABLE: ADDITIONAL COMMENTS', label: 'Reliable' },
+            { key: 'PERSONABLE: ADDITIONAL COMMENTS', label: 'Personable' },
+            { key: 'FAST: ADDITIONAL COMMENTS', label: 'Fast' },
+            { key: 'OTHER FACTORS REMARKS', label: 'Other Factors' },
+            { key: 'WHAT MATTERS TO THE BUSINESS REMARKS', label: 'Safe & Secure' }
         ];
 
         const commentsList = commentFields
             .map(item => {
                 const val = String(r[item.key] || '').trim();
                 if (val && !NON_ISSUE_VALUES.has(val.toUpperCase())) {
-                    return `<strong>${escapeHtml(item.label)}:</strong> ${escapeHtml(val)}`;
+                    return `<strong class="comment-label">${escapeHtml(item.label)}:</strong> ${escapeHtml(val)}`;
                 }
                 return null;
             })
@@ -1198,11 +1191,104 @@ async function renderAgentView() {
 }
 
 /* ==========================================================================
+   FLOATING CARD SYSTEM
+   ========================================================================== */
+const floatingCards = {}; // id → { overlay, placeholder, originalParent, nextSibling, card }
+
+function floatCard(cardId) {
+    const card = document.getElementById(cardId);
+    if (!card || floatingCards[cardId]) return;
+
+    const originalParent = card.parentNode;
+    const nextSibling = card.nextSibling;
+    const title = card.querySelector('h3').textContent.trim().replace(/[⧉]/g, '').trim();
+    const rect = card.getBoundingClientRect();
+
+    const placeholder = document.createElement('div');
+    placeholder.className = 'card-table-placeholder';
+    placeholder.title = 'Click to dock back';
+    placeholder.textContent = '↩ ' + title;
+    placeholder.onclick = () => dockCard(cardId);
+    originalParent.insertBefore(placeholder, card);
+
+    const overlay = document.createElement('div');
+    overlay.className = 'float-overlay';
+    overlay.style.left = Math.min(rect.left, window.innerWidth - 420) + 'px';
+    overlay.style.top = Math.max(rect.top, 60) + 'px';
+    overlay.style.width = Math.max(rect.width, 340) + 'px';
+
+    overlay.innerHTML = `
+        <div class="float-overlay-header" id="fh-${cardId}">
+            <span class="float-overlay-title">${escapeHtml(title)}</span>
+            <div class="float-overlay-actions">
+                <button class="float-dock-btn" onclick="dockCard('${cardId}')">↩ Dock</button>
+                <button class="float-close-btn" onclick="dockCard('${cardId}')" title="Close">✕</button>
+            </div>
+        </div>
+        <div class="float-overlay-body" id="fb-${cardId}"></div>`;
+
+    document.body.appendChild(overlay);
+
+    const body = overlay.querySelector(`#fb-${cardId}`);
+    Array.from(card.children).forEach(child => {
+        if (child.tagName !== 'H3') body.appendChild(child);
+    });
+
+    card.style.display = 'none';
+    originalParent.removeChild(card);
+
+    floatingCards[cardId] = { overlay, placeholder, originalParent, nextSibling, card };
+    makeDraggable(overlay, overlay.querySelector(`#fh-${cardId}`));
+}
+
+function dockCard(cardId) {
+    const entry = floatingCards[cardId];
+    if (!entry) return;
+    const { overlay, placeholder, originalParent, nextSibling, card } = entry;
+
+    const body = overlay.querySelector(`#fb-${cardId}`);
+    Array.from(body.children).forEach(child => card.appendChild(child));
+
+    card.style.display = '';
+    if (nextSibling && nextSibling.parentNode === originalParent) {
+        originalParent.insertBefore(card, nextSibling);
+    } else {
+        originalParent.appendChild(card);
+    }
+
+    overlay.remove();
+    placeholder.remove();
+    delete floatingCards[cardId];
+}
+
+function makeDraggable(el, handle) {
+    let startX, startY, startLeft, startTop;
+    handle.addEventListener('mousedown', e => {
+        if (e.target.tagName === 'BUTTON') return;
+        e.preventDefault();
+        startX = e.clientX;
+        startY = e.clientY;
+        startLeft = parseInt(el.style.left) || 0;
+        startTop = parseInt(el.style.top) || 0;
+
+        const onMove = e => {
+            const dx = e.clientX - startX;
+            const dy = e.clientY - startY;
+            el.style.left = Math.max(0, Math.min(window.innerWidth - 80, startLeft + dx)) + 'px';
+            el.style.top = Math.max(0, Math.min(window.innerHeight - 40, startTop + dy)) + 'px';
+        };
+        const onUp = () => {
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+        };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+    });
+}
+
+/* ==========================================================================
    EXPOSE TO WINDOW
    ========================================================================== */
-window.switchAuthTab = switchAuthTab;
-window.setSignupRole = setSignupRole;
-window.handleSignup = handleSignup;
 window.handleLogin = handleLogin;
 window.logout = logout;
 window.filterData = filterData;
@@ -1211,11 +1297,8 @@ window.toggleUploadPanel = toggleUploadPanel;
 window.handleRosterUpload = handleRosterUpload;
 window.handleDataUpload = handleDataUpload;
 window.resyncAgentEmails = resyncAgentEmails;
-
-/* ==========================================================================
-   INIT
-   ========================================================================== */
-setSignupRole('agent');
+window.floatCard = floatCard;
+window.dockCard = dockCard;
 
 (function prefillLoginEmailFromUrl() {
     const params = new URLSearchParams(window.location.search);
