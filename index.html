@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SMART Quality Score Management Dashboard</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
 <link rel="stylesheet" href="styles.css">
 <script type="module" src="script.js"></script>
 </head>
@@ -32,65 +34,21 @@
 <!-- ============ AUTH SCREEN ============ -->
 <div class="auth-wrap" id="authScreen">
     <div class="auth-card">
-        <div class="auth-tabs">
-            <div class="auth-tab active" id="tabLogin" onclick="switchAuthTab('login')">Log In</div>
-            <div class="auth-tab" id="tabSignup" onclick="switchAuthTab('signup')">Create Account</div>
-        </div>
-
-        <!-- LOGIN -->
         <div class="auth-body" id="loginPane">
-            <h2>Welcome back</h2>
-            <p class="sub">Log in with your work email to view your Quality Score dashboard.</p>
+            <h2>Welcome</h2>
+            <p class="sub">Log in with your SMART domain and Win ID. There's no separate sign-up — your account comes from the roster your supervisor uploads.</p>
             <div class="form-group">
-                <label>Work Email</label>
-                <input type="email" id="loginEmail" placeholder="name@company.com" autocomplete="username">
+                <label>SMART Domain</label>
+                <input type="email" id="loginEmail" placeholder="t-jrarsaga@supplier.smart.com.ph" autocomplete="username"
+                    onkeydown="if(event.key==='Enter') document.getElementById('loginPassword').focus()">
             </div>
             <div class="form-group">
-                <label>Password</label>
-                <input type="password" id="loginPassword" placeholder="••••••••" autocomplete="current-password">
+                <label>Win ID</label>
+                <input type="password" id="loginPassword" placeholder="e.g. 52365900" autocomplete="current-password"
+                    onkeydown="if(event.key==='Enter') handleLogin()">
             </div>
             <button class="btn-primary" onclick="handleLogin()">Log In</button>
             <div class="auth-msg" id="loginMsg"></div>
-        </div>
-
-        <!-- SIGNUP -->
-        <div class="auth-body" id="signupPane" style="display:none;">
-            <h2>Create your account</h2>
-            <p class="sub">Sign up with your @supplier.smart.com.ph work email. Agents are matched automatically to their audit scores using the roster your supervisor uploaded.</p>
-
-            <div class="role-toggle">
-                <label id="roleAgentLabel" class="checked" onclick="setSignupRole('agent')"><span>Agent</span></label>
-                <label id="roleTeamLeaderLabel" onclick="setSignupRole('team_leader')"><span>Team Leader</span></label>
-                <label id="roleQualityLabel" onclick="setSignupRole('quality')"><span>Quality</span></label>
-            </div>
-
-            <div class="form-group">
-                <label>Work Email</label>
-                <input type="email" id="signupEmail" placeholder="name@supplier.smart.com.ph" autocomplete="username">
-            </div>
-
-            <div class="field-row-2">
-                <div class="form-group">
-                    <label>Password</label>
-                    <input type="password" id="signupPassword" placeholder="••••••••" autocomplete="new-password">
-                </div>
-                <div class="form-group">
-                    <label>Confirm Password</label>
-                    <input type="password" id="signupPassword2" placeholder="••••••••" autocomplete="new-password">
-                </div>
-            </div>
-
-            <div class="form-group" id="supervisorCodeGroup" style="display:none;">
-                <label id="supervisorCodeLabel">Invite Code</label>
-                <input type="text" id="supervisorCode" placeholder="Enter the invite code given by your admin">
-            </div>
-
-            <button class="btn-primary" onclick="handleSignup()">Create Account</button>
-            <div class="auth-msg" id="signupMsg"></div>
-
-            <div class="auth-hint">
-                Agent sign-up only succeeds if your email already appears on the roster your supervisor uploaded. Team Leader and Quality accounts require an invite code — contact your supervisor if you don't have one.
-            </div>
         </div>
     </div>
 </div>
@@ -153,10 +111,11 @@
                 <div class="upload-section">
                     <h4>1. Agent Roster</h4>
                     <div class="upload-btn-wrapper">
-                        <button class="btn-upload">📇 Upload Roster (Email/Name/ID)</button>
+                        <button class="btn-upload">📇 Upload Roster (Email/Name/Win ID)</button>
                         <input type="file" id="rosterFileInput" accept=".csv,.xlsx,.xls" onchange="handleRosterUpload(event)">
                     </div>
                     <div class="file-status" id="rosterStatus">No roster loaded yet.</div>
+                    <div class="file-status">Include a Position column (e.g. "Quality Analyst", "Team Leader") so those accounts get dashboard access automatically — without it, everyone logs in as an Agent.</div>
                 </div>
 
                 <div class="upload-section">
@@ -174,59 +133,52 @@
 
         <div class="dashboard-canvas" id="supervisorView" style="display:none;">
             <div class="tables-grid">
-                <div class="card-table">
-                    <h3>Pass Rate %</h3>
-                    <table class="excel-table">
-                        <thead><tr><th>Row Labels</th><th>PASSED</th><th>FAILED</th><th>Total</th></tr></thead>
-                        <tbody>
-                            <tr class="total-row">
-                                <td>Grand Total</td>
-                                <td id="totalPassRateVal">-</td>
-                                <td id="totalFailRateVal">-</td>
-                                <td>100%</td>
-                            </tr>
-                        </tbody>
-                    </table>
+                <div class="card-table" id="card-passrate">
+                    <h3>Pass Rate % <button class="float-btn" title="Float panel" onclick="floatCard('card-passrate')">⧉</button></h3>
+                    <div class="table-scroll-wrap">
+                        <div class="scroll-btn" onclick="this.nextElementSibling.scrollLeft-=120">&#8249;</div>
+                        <div class="table-scroll-inner">
+                            <table class="excel-table summary-detail-table">
+                                <thead><tr><th>LOB</th><th>PASSED</th><th>FAILED</th><th>Total</th></tr></thead>
+                                <tbody id="passRateSummaryBody"><tr><td colspan="4" class="empty-note">Upload data to populate.</td></tr></tbody>
+                            </table>
+                        </div>
+                        <div class="scroll-btn" onclick="this.previousElementSibling.scrollLeft+=120">&#8250;</div>
+                    </div>
                 </div>
-                <div class="card-table">
-                    <h3>Number of Audits (by Tenure)</h3>
-                    <table class="excel-table">
-                        <thead><tr><th>Row Labels</th><th>0-30</th><th>31-90</th><th>&gt;91 Days</th><th>Total</th></tr></thead>
-                        <tbody>
-                            <tr class="total-row">
-                                <td>Grand Total</td>
-                                <td id="totalAuditNhip">-</td>
-                                <td id="totalAudit31">-</td>
-                                <td id="totalAudit91">-</td>
-                                <td id="totalAuditTotal">-</td>
-                            </tr>
-                        </tbody>
-                    </table>
+                <div class="card-table" id="card-auditcount">
+                    <h3>Number of Audits (by Tenure) <button class="float-btn" title="Float panel" onclick="floatCard('card-auditcount')">⧉</button></h3>
+                    <div class="table-scroll-wrap">
+                        <div class="scroll-btn" onclick="this.nextElementSibling.scrollLeft-=120">&#8249;</div>
+                        <div class="table-scroll-inner">
+                            <table class="excel-table summary-detail-table">
+                                <thead><tr><th>LOB</th><th>NCIP</th><th>NHIP</th><th>0-30 Days</th><th>31-60 Days</th><th>61-90 Days</th><th>&gt;91 Days</th><th>Grand Total</th></tr></thead>
+                                <tbody id="auditCountSummaryBody"><tr><td colspan="8" class="empty-note">Upload data to populate.</td></tr></tbody>
+                            </table>
+                        </div>
+                        <div class="scroll-btn" onclick="this.previousElementSibling.scrollLeft+=120">&#8250;</div>
+                    </div>
                 </div>
-                <div class="card-table">
-                    <h3>Average QA Scores (by Tenure)</h3>
-                    <table class="excel-table">
-                        <thead><tr><th>Row Labels</th><th>0-30</th><th>31-90</th><th>&gt;91 Days</th><th>Total</th></tr></thead>
-                        <tbody>
-                            <tr class="total-row">
-                                <td>Grand Total</td>
-                                <td id="totalAvgNhip">-</td>
-                                <td id="totalAvg31">-</td>
-                                <td id="totalAvg91">-</td>
-                                <td id="totalAvgTotal">-</td>
-                            </tr>
-                        </tbody>
-                    </table>
+                <div class="card-table" id="card-avgscore">
+                    <h3>Average OA Scores (by Tenure) <button class="float-btn" title="Float panel" onclick="floatCard('card-avgscore')">⧉</button></h3>
+                    <div class="table-scroll-wrap">
+                        <div class="scroll-btn" onclick="this.nextElementSibling.scrollLeft-=120">&#8249;</div>
+                        <div class="table-scroll-inner">
+                            <table class="excel-table summary-detail-table">
+                                <thead><tr><th>LOB</th><th>NCIP</th><th>NHIP</th><th>0-30 Days</th><th>31-60 Days</th><th>61-90 Days</th><th>&gt;91 Days</th><th>Grand Total</th></tr></thead>
+                                <tbody id="averageScoreSummaryBody"><tr><td colspan="8" class="empty-note">Upload data to populate.</td></tr></tbody>
+                            </table>
+                        </div>
+                        <div class="scroll-btn" onclick="this.previousElementSibling.scrollLeft+=120">&#8250;</div>
+                    </div>
                 </div>
-                <div class="card-table">
-                    <h3>CM Distribution</h3>
+                <div class="card-table" id="card-cm">
+                    <h3>CM Distribution <button class="float-btn" title="Float panel" onclick="floatCard('card-cm')">⧉</button></h3>
                     <table class="excel-table">
-                        <thead><tr><th>Superstar</th><th>Performer</th><th>Laggard</th><th>Underperformer</th></tr></thead>
+                        <thead><tr><th>Superstar</th><th>Underperformer</th></tr></thead>
                         <tbody>
                             <tr class="total-row">
                                 <td id="cmSuperstarVal">-</td>
-                                <td id="cmPerformerVal">-</td>
-                                <td id="cmLaggardVal">-</td>
                                 <td id="cmUnderperformerVal">-</td>
                             </tr>
                         </tbody>
@@ -237,7 +189,9 @@
             <div class="charts-row-1">
                 <div class="chart-box">
                     <div class="chart-title">SCORE PER LOB</div>
-                    <div id="parameterChart" style="display: flex; flex-direction: column; height: 100%;"></div>
+                    <div class="chart-canvas-wrapper">
+                        <canvas id="lobChartCanvas"></canvas>
+                    </div>
                 </div>
                 <div class="chart-box">
                     <div class="chart-title">Scores Per Team Leader</div>
