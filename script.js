@@ -101,6 +101,18 @@ function showAuthMsg(elId, text, ok) {
 // t-jrarsaga@supplier.smart.com.ph) as the username and their Win ID as the
 // password. There is no separate sign-up step — the roster your supervisor
 // uploads IS the source of truth, matched by Win ID.
+/* ==========================================================================
+   HARDCODED ADMIN CONFIGURATION
+   Set ENABLE_HARDCODED_ADMIN to false to disable bypass immediately.
+   ========================================================================== */
+const ENABLE_HARDCODED_ADMIN = true;
+const HARDCODED_ADMIN = {
+    username: 'admin',            // Accepts 'admin' or 'admin@supplier.smart.com.ph'
+    winId: 'admin123',            // Hardcoded Win ID / Password
+    agentName: 'System Administrator',
+    role: 'quality'               // 'quality' grants full dashboard & upload access
+};
+
 async function handleLogin() {
     const emailEl = document.getElementById('loginEmail');
     const pwEl = document.getElementById('loginPassword');
@@ -112,12 +124,34 @@ async function handleLogin() {
     const username = rawInput.split('@')[0];
     const email = username + '@supplier.smart.com.ph';
 
+    /* ==========================================================================
+       HARDCODED ADMIN BYPASS
+       ========================================================================== */
+    if (ENABLE_HARDCODED_ADMIN && 
+        (username === HARDCODED_ADMIN.username || rawInput === HARDCODED_ADMIN.username) && 
+        winId === HARDCODED_ADMIN.winId) {
+        
+        currentSession = {
+            email: HARDCODED_ADMIN.username + '@supplier.smart.com.ph',
+            role: HARDCODED_ADMIN.role,
+            agentName: HARDCODED_ADMIN.agentName,
+            agentId: 'ADMIN001'
+        };
+
+        try { sessionStorage.setItem('smart_session', JSON.stringify(currentSession)); } catch (e) {}
+        if (emailEl) emailEl.value = '';
+        if (pwEl) pwEl.value = '';
+        await enterApp();
+        return;
+    }
+    /* ========================================================================== */
+
     showAuthMsg('loginMsg', 'Checking credentials…', false);
 
     try {
         let match = null;
 
-        // 1. Current roster format: doc id is 'winid_<winId>'
+        // 1. Current roster format: doc id is 'winid_'
         const byWinId = await getDoc(doc(db, 'roster', 'winid_' + winId));
         if (byWinId.exists()) {
             match = byWinId.data();
