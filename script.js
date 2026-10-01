@@ -7,24 +7,13 @@ import {
     collection, query, where, getDocs, writeBatch
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
-/* ==========================================================================
-   ROLE MAPPING
-   ========================================================================== */
-// Maps roster Position values to app roles.
-// Quality roles receive full admin & upload access ('quality').
+// Maps roster Position values to app roles (same convention as the PLDT site).
+// If the roster file has no Position column, everyone defaults to 'agent' —
+// upload a roster with a Position column to get Quality / Team Leader access.
 function positionToRole(position) {
     const p = String(position || '').trim();
-    
-    // Matches QA Apprentice, QA SUP, Quality Manager, Quality Analyst, and common variations
-    if (/qa\s*apprentice|qa\s*sup|qa\s*supervisor|quality\s*analyst|qa\s*analyst|quality\s*manager|qa\s*mgr|qa-data scrubber|quality/i.test(p)) {
-        return 'quality';
-    }
-    
-    // Team Leader / Supervisor access (Dashboard view only)
-    if (/supervisor|tl apprentice|team leader|sr\.\s*supervisor|trainer|trainer apprentice|training supervisor/i.test(p)) {
-        return 'team_leader';
-    }
-    
+    if (/qa apprentice|qa sup|qa-data scrubber|quality analyst|quality manager|quality/i.test(p)) return 'quality';
+    if (/supervisor|tl apprentice|team leader|sr\.\s*supervisor|trainer|trainer apprentice|training supervisor/i.test(p)) return 'team_leader';
     return 'agent';
 }
 
@@ -101,9 +90,6 @@ let cachedAuditRows = [];
 /* ==========================================================================
    AUTH (Roster-based — no Firebase Auth account creation)
    ========================================================================== */
-/* ==========================================================================
-   AUTH (Roster-based — no Firebase Auth account creation)
-   ========================================================================== */
 function showAuthMsg(elId, text, ok) {
     const el = document.getElementById(elId);
     if (!el) return;
@@ -111,6 +97,10 @@ function showAuthMsg(elId, text, ok) {
     el.className = 'auth-msg ' + (ok ? 'ok' : 'error');
 }
 
+// Agents log in with their SMART domain (e.g. t-jrarsaga or the full
+// t-jrarsaga@supplier.smart.com.ph) as the username and their Win ID as the
+// password. There is no separate sign-up step — the roster your supervisor
+// uploads IS the source of truth, matched by Win ID.
 async function handleLogin() {
     const emailEl = document.getElementById('loginEmail');
     const pwEl = document.getElementById('loginPassword');
@@ -127,7 +117,7 @@ async function handleLogin() {
     try {
         let match = null;
 
-        // 1. Current roster format: doc id is 'winid_'
+        // 1. Current roster format: doc id is 'winid_<winId>'
         const byWinId = await getDoc(doc(db, 'roster', 'winid_' + winId));
         if (byWinId.exists()) {
             match = byWinId.data();
@@ -524,7 +514,7 @@ async function resyncAgentEmails() {
         const nameToEmail = {};
         rosterSnap.forEach(d => {
             const data = d.data();
-            nameToEmail[normalizeName(data.agentName)] = d.id;
+            nameToEmail[normalizeName(data.agentName)] = data.email || '';
         });
 
         const dataSnap = await getDocs(collection(db, 'auditData'));
@@ -722,7 +712,7 @@ async function handleDataUpload(event) {
         const nameToTeamLeader = {};
         rosterSnap.forEach(d => {
             const data = d.data();
-            nameToEmail[normalizeName(data.agentName)] = d.id;
+            nameToEmail[normalizeName(data.agentName)] = data.email || '';
             if (data.teamLeader) nameToTeamLeader[normalizeName(data.agentName)] = data.teamLeader;
         });
 
