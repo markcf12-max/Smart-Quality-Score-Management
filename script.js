@@ -7,13 +7,24 @@ import {
     collection, query, where, getDocs, writeBatch
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
-// Maps roster Position values to app roles (same convention as the PLDT site).
-// If the roster file has no Position column, everyone defaults to 'agent' —
-// upload a roster with a Position column to get Quality / Team Leader access.
+/* ==========================================================================
+   ROLE MAPPING
+   ========================================================================== */
+// Maps roster Position values to app roles.
+// Quality roles receive full admin & upload access ('quality').
 function positionToRole(position) {
     const p = String(position || '').trim();
-    if (/qa apprentice|qa sup|qa-data scrubber|quality analyst|quality manager|quality/i.test(p)) return 'quality';
-    if (/supervisor|tl apprentice|team leader|sr\.\s*supervisor|trainer|trainer apprentice|training supervisor/i.test(p)) return 'team_leader';
+    
+    // Matches QA Apprentice, QA SUP, Quality Manager, Quality Analyst, and common variations
+    if (/qa\s*apprentice|qa\s*sup|qa\s*supervisor|quality\s*analyst|qa\s*analyst|quality\s*manager|qa\s*mgr|qa-data scrubber|quality/i.test(p)) {
+        return 'quality';
+    }
+    
+    // Team Leader / Supervisor access (Dashboard view only)
+    if (/supervisor|tl apprentice|team leader|sr\.\s*supervisor|trainer|trainer apprentice|training supervisor/i.test(p)) {
+        return 'team_leader';
+    }
+    
     return 'agent';
 }
 
@@ -90,28 +101,15 @@ let cachedAuditRows = [];
 /* ==========================================================================
    AUTH (Roster-based — no Firebase Auth account creation)
    ========================================================================== */
+/* ==========================================================================
+   AUTH (Roster-based — no Firebase Auth account creation)
+   ========================================================================== */
 function showAuthMsg(elId, text, ok) {
     const el = document.getElementById(elId);
     if (!el) return;
     el.textContent = text;
     el.className = 'auth-msg ' + (ok ? 'ok' : 'error');
 }
-
-// Agents log in with their SMART domain (e.g. t-jrarsaga or the full
-// t-jrarsaga@supplier.smart.com.ph) as the username and their Win ID as the
-// password. There is no separate sign-up step — the roster your supervisor
-// uploads IS the source of truth, matched by Win ID.
-/* ==========================================================================
-   HARDCODED ADMIN CONFIGURATION
-   Set ENABLE_HARDCODED_ADMIN to false to disable bypass immediately.
-   ========================================================================== */
-const ENABLE_HARDCODED_ADMIN = true;
-const HARDCODED_ADMIN = {
-    username: 'admin',            // Accepts 'admin' or 'admin@supplier.smart.com.ph'
-    winId: 'admin123',            // Hardcoded Win ID / Password
-    agentName: 'System Administrator',
-    role: 'quality'               // 'quality' grants full dashboard & upload access
-};
 
 async function handleLogin() {
     const emailEl = document.getElementById('loginEmail');
@@ -123,28 +121,6 @@ async function handleLogin() {
 
     const username = rawInput.split('@')[0];
     const email = username + '@supplier.smart.com.ph';
-
-    /* ==========================================================================
-       HARDCODED ADMIN BYPASS
-       ========================================================================== */
-    if (ENABLE_HARDCODED_ADMIN && 
-        (username === HARDCODED_ADMIN.username || rawInput === HARDCODED_ADMIN.username) && 
-        winId === HARDCODED_ADMIN.winId) {
-        
-        currentSession = {
-            email: HARDCODED_ADMIN.username + '@supplier.smart.com.ph',
-            role: HARDCODED_ADMIN.role,
-            agentName: HARDCODED_ADMIN.agentName,
-            agentId: 'ADMIN001'
-        };
-
-        try { sessionStorage.setItem('smart_session', JSON.stringify(currentSession)); } catch (e) {}
-        if (emailEl) emailEl.value = '';
-        if (pwEl) pwEl.value = '';
-        await enterApp();
-        return;
-    }
-    /* ========================================================================== */
 
     showAuthMsg('loginMsg', 'Checking credentials…', false);
 
