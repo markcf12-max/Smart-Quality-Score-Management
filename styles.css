@@ -273,7 +273,6 @@ body {
     box-shadow: 0 2px 10px rgba(0,0,0,0.04);
     display: flex;
     flex-direction: column;
-    gap: 14px;
 }
 .filters-panel-head {
     display: flex;
@@ -285,6 +284,13 @@ body {
     letter-spacing: 0.3px;
     padding-bottom: 10px;
     border-bottom: 1px solid #f0ece6;
+}
+.filters-panel-head-actions { display: flex; align-items: center; gap: 4px; }
+.filters-panel-body {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding-top: 14px;
 }
 .filters-reset {
     background: none;
@@ -300,6 +306,19 @@ body {
     transition: color 0.15s ease, background 0.15s ease;
 }
 .filters-reset:hover { color: var(--smart-green-dark); background: var(--slicer-bg); }
+.filters-toggle {
+    background: none;
+    border: none;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--smart-green-mid);
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+    line-height: 1;
+    transition: background 0.15s ease;
+}
+.filters-toggle:hover { background: var(--slicer-bg); }
 
 .filter-field { display: flex; flex-direction: column; gap: 5px; }
 .filter-field label {
