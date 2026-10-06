@@ -790,7 +790,17 @@ async function handleDataUpload(event) {
 /* ==========================================================================
    SUPERVISOR DASHBOARD — FILTERS + RENDER
    ========================================================================== */
+// LOBs listed here are excluded from the supervisor dashboard (tables, chart,
+// filters, top hits) — but NOT from an individual agent's own view, since
+// that's a separate per-agent Firestore query unaffected by this list.
+// To bring a LOB back, just remove its entry here.
+const HIDDEN_LOBS = new Set(['SMART ENTERPRISE EXTENSION']);
+function isHiddenLob(lobValue) {
+    return HIDDEN_LOBS.has(normVal(lobValue));
+}
+
 function populateDropdownOptions(rows) {
+    rows = rows.filter(r => !isHiddenLob(r['BRAND']));
     const map = {
         selectFormType: 'FORM TYPE',
         selectBrand: 'BRAND',
@@ -860,6 +870,15 @@ function toggleUploadPanel() {
     panel.style.display = panel.style.display === 'none' ? 'flex' : 'none';
 }
 
+function toggleFiltersPanel() {
+    const body = document.getElementById('filtersPanelBody');
+    const btn = document.getElementById('filtersToggleBtn');
+    if (!body) return;
+    const isHidden = body.style.display === 'none';
+    body.style.display = isHidden ? 'flex' : 'none';
+    if (btn) btn.textContent = isHidden ? '▾' : '▸';
+}
+
 function resetFilters() {
     ['selectFormType', 'selectBrand', 'selectMonth', 'selectWeekending', 'selectTenure', 'selectTeamLeader']
         .forEach(id => { document.getElementById(id).value = 'ALL'; });
@@ -867,7 +886,7 @@ function resetFilters() {
 }
 
 function filterData() {
-    const rows = cachedAuditRows;
+    const rows = cachedAuditRows.filter(r => !isHiddenLob(r['BRAND']));
     if (!rows.length) return;
 
     const f = {
@@ -1303,6 +1322,7 @@ window.logout = logout;
 window.filterData = filterData;
 window.resetFilters = resetFilters;
 window.toggleUploadPanel = toggleUploadPanel;
+window.toggleFiltersPanel = toggleFiltersPanel;
 window.handleRosterUpload = handleRosterUpload;
 window.handleDataUpload = handleDataUpload;
 window.resyncAgentEmails = resyncAgentEmails;
