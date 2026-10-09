@@ -949,11 +949,11 @@ function renderGroupedBarChart(data) {
         data: {
             labels,
             datasets: [
-                { label: 'Reliable', data: labels.map(l => getAvg(groups[l].reliable)), backgroundColor: '#EF9A9A' },
-                { label: 'Personable', data: labels.map(l => getAvg(groups[l].personable)), backgroundColor: '#E57373' },
-                { label: 'Fast', data: labels.map(l => getAvg(groups[l].fast)), backgroundColor: '#E53935' },
-                { label: 'Safe & Secure', data: labels.map(l => getAvg(groups[l].safe)), backgroundColor: '#C62828' },
-                { label: 'Overall Score', data: labels.map(l => getAvg(groups[l].overall)), backgroundColor: '#7F0000' }
+                { label: 'Reliable', data: labels.map(l => getAvg(groups[l].reliable)), backgroundColor: '#b2d8be' },
+                { label: 'Personable', data: labels.map(l => getAvg(groups[l].personable)), backgroundColor: '#6fb88a' },
+                { label: 'Fast', data: labels.map(l => getAvg(groups[l].fast)), backgroundColor: '#28884d' },
+                { label: 'Safe & Secure', data: labels.map(l => getAvg(groups[l].safe)), backgroundColor: '#0f6130' },
+                { label: 'Overall Score', data: labels.map(l => getAvg(groups[l].overall)), backgroundColor: '#063b1b' }
             ]
         },
         plugins: [ChartDataLabels],
