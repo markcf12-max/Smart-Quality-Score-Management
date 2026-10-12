@@ -57,6 +57,7 @@
 <!-- ============ APP SCREEN ============ -->
 <div id="appScreen">
     <div class="app-body">
+        <button type="button" class="sidebar-toggle" id="sidebarToggleBtn" onclick="toggleSidebar()" title="Hide filters & data" style="display:none;">«</button>
 
         <!-- ===== SUPERVISOR VIEW ===== -->
         <div class="sidebar" id="supervisorSidebar" style="display:none;">
@@ -138,6 +139,13 @@
         </div>
 
         <div class="dashboard-canvas" id="supervisorView" style="display:none;">
+            <div class="scope-bar" id="scopeBar" style="display:none;">
+                <span class="scope-label" id="scopeLabel"></span>
+                <div class="scope-toggle" id="scopeToggle">
+                    <button type="button" id="scopeTeamBtn" class="active" onclick="setScope('team')">My Team</button>
+                    <button type="button" id="scopeAllBtn" onclick="setScope('all')">Overall</button>
+                </div>
+            </div>
             <div class="tables-grid">
                 <div class="card-table" id="card-passrate">
                     <h3>Pass Rate % <button class="float-btn" title="Float panel" onclick="floatCard('card-passrate')">⧉</button></h3>
