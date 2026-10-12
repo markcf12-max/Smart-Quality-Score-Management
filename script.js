@@ -964,19 +964,19 @@ function renderGroupedBarChart(data) {
             plugins: {
                 legend: {
                     position: 'top',
-                    labels: { usePointStyle: true, pointStyle: 'rect', padding: 15, font: { size: 10, weight: 'bold' } }
+                    labels: { usePointStyle: true, pointStyle: 'rect', padding: 15, font: { size: 13, weight: 'bold' } }
                 },
                 datalabels: {
                     anchor: 'end', align: 'top', offset: 2,
                     formatter: (val) => val ? val + '%' : '',
-                    font: { size: 8, weight: 'bold' }, color: '#333'
+                    font: { size: 13, weight: 'bold' }, color: '#1a1a1a'
                 }
             },
             scales: {
                 y: { display: false, max: 115 },
                 x: {
                     grid: { display: false },
-                    ticks: { font: { size: 9, weight: '600' }, color: '#333', maxRotation: 45, minRotation: 0, autoSkip: false }
+                    ticks: { font: { size: 12, weight: 'bold' }, color: '#1a1a1a', maxRotation: 45, minRotation: 0, autoSkip: false }
                 }
             }
         }
