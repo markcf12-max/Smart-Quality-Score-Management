@@ -221,7 +221,42 @@ body {
 .field-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 
 /* ============ APP BODY ============ */
-.app-body { display: flex; flex: 1; overflow: hidden; }
+.app-body { display: flex; flex: 1; overflow: hidden; position: relative; }
+
+/* Collapsible sidebar */
+.sidebar { transition: width 0.2s ease, padding 0.2s ease; flex-shrink: 0; }
+.app-body.sidebar-collapsed .sidebar {
+    width: 0; padding-left: 0; padding-right: 0; border-right: none; overflow: hidden; visibility: hidden;
+}
+.sidebar-toggle {
+    position: absolute; top: 12px; left: 250px; z-index: 20;
+    width: 22px; height: 42px; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: white; border: 1px solid #d9c5b2; border-left: none;
+    border-radius: 0 8px 8px 0; cursor: pointer;
+    font-size: 15px; font-weight: 700; color: var(--smart-green-dark);
+    box-shadow: 2px 1px 6px rgba(0,0,0,0.08);
+    transition: left 0.2s ease, background 0.15s ease;
+}
+.sidebar-toggle:hover { background: var(--slicer-bg); }
+.app-body.sidebar-collapsed .sidebar-toggle { left: 0; }
+
+/* Scope bar (Team Leader My Team / Overall, Quality resigned toggle) */
+.scope-bar {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    background: white; border: 1px solid var(--card-border); border-radius: 8px;
+    padding: 8px 12px; padding-left: 30px;
+}
+.scope-label { font-size: 12px; font-weight: 700; color: var(--smart-green-dark); flex: 1; min-width: 180px; }
+.scope-toggle { display: inline-flex; border: 1px solid var(--smart-green-mid); border-radius: 8px; overflow: hidden; }
+.scope-toggle button {
+    background: white; border: none; padding: 6px 14px; font-size: 12px; font-weight: 700;
+    color: var(--smart-green-mid); cursor: pointer; transition: background 0.15s ease, color 0.15s ease;
+}
+.scope-toggle button.active { background: var(--smart-green-mid); color: white; }
+.scope-toggle button:not(.active):hover { background: var(--slicer-bg); }
+.resigned-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: #666; cursor: pointer; }
+
 #appScreen { display: none; flex: 1; flex-direction: column; }
 
 /* SIDEBAR / SLICERS */
