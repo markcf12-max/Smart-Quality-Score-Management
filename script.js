@@ -87,6 +87,86 @@ async function replaceAuditData(rows) {
 let currentSession = null;
 let cachedAuditRows = [];
 
+/* Resigned-agent hiding + Team Leader scoping.
+   Resigned agents (Termed sheet) stay in Firestore so nothing is lost; they are
+   only filtered out of what the dashboard displays and computes. */
+let termedNameKeys = new Set();
+let viewScope = 'team';        // Team Leaders: 'team' (own team) or 'all' (overall)
+
+function buildTermedSets(rosterSnap) {
+    const termed = new Set();
+    const active = new Set();
+    rosterSnap.forEach(d => {
+        const data = d.data();
+        const key = normalizeName(data.agentName);
+        if (!key) return;
+        if (data.status === 'termed') termed.add(key); else active.add(key);
+    });
+    // Rehired agents appear on both sheets — Active wins.
+    active.forEach(k => termed.delete(k));
+    termedNameKeys = termed;
+}
+
+function isTermedRow(r) {
+    return termedNameKeys.has(normalizeName(r['AGENT/OFFICER NAME']));
+}
+
+/* Resigned agents are hidden BY NAME only (My Team list). Their audits still
+   count in every score, table and chart exactly as before. */
+function applyVisibility(rows) {
+    let out = rows;
+    if (currentSession && currentSession.role === 'team_leader' && viewScope === 'team' && currentSession.agentName) {
+        const myKey = normalizeName(currentSession.agentName);
+        out = out.filter(r => normalizeName(r['TEAM LEADER']) === myKey);
+    }
+    return out;
+}
+
+function updateScopeBar() {
+    const bar = document.getElementById('scopeBar');
+    if (!bar || !currentSession) return;
+    const isTL = currentSession.role === 'team_leader';
+    document.getElementById('scopeToggle').style.display = isTL ? 'inline-flex' : 'none';
+    bar.style.display = isTL ? 'flex' : 'none';
+    const label = document.getElementById('scopeLabel');
+    label.textContent = viewScope === 'team' ? 'Showing: your team' : 'Showing: overall score';
+    document.getElementById('scopeTeamBtn').classList.toggle('active', viewScope === 'team');
+    document.getElementById('scopeAllBtn').classList.toggle('active', viewScope === 'all');
+}
+
+function setScope(scope) {
+    viewScope = scope;
+    updateScopeBar();
+    populateDropdownOptions(cachedAuditRows);
+    filterData();
+}
+
+function toggleSidebar() {
+    const body = document.querySelector('.app-body');
+    const collapsed = body.classList.toggle('sidebar-collapsed');
+    const btn = document.getElementById('sidebarToggleBtn');
+    if (btn) {
+        btn.textContent = collapsed ? '»' : '«';
+        btn.title = collapsed ? 'Show filters & data' : 'Hide filters & data';
+    }
+    try { localStorage.setItem('smart_sidebar_collapsed', collapsed ? '1' : '0'); } catch (e) {}
+    // let the layout settle, then make Chart.js re-measure
+    setTimeout(() => { if (lobChartInstance) lobChartInstance.resize(); }, 260);
+}
+
+function restoreSidebarState() {
+    let collapsed = false;
+    try { collapsed = localStorage.getItem('smart_sidebar_collapsed') === '1'; } catch (e) {}
+    const body = document.querySelector('.app-body');
+    if (!body) return;
+    body.classList.toggle('sidebar-collapsed', collapsed);
+    const btn = document.getElementById('sidebarToggleBtn');
+    if (btn) {
+        btn.textContent = collapsed ? '»' : '«';
+        btn.title = collapsed ? 'Show filters & data' : 'Hide filters & data';
+    }
+}
+
 /* ==========================================================================
    AUTH (Roster-based — no Firebase Auth account creation)
    ========================================================================== */
@@ -141,6 +221,10 @@ async function handleLogin() {
 
         if (!match) {
             return showAuthMsg('loginMsg', 'Credentials not found on the roster. Ask your supervisor to upload the latest roster.', false);
+        }
+
+        if (match.status === 'termed') {
+            return showAuthMsg('loginMsg', 'This account is no longer active. Please contact your supervisor.', false);
         }
 
         const role = match.position ? positionToRole(match.position) : 'agent';
@@ -227,7 +311,11 @@ async function enterApp() {
     document.getElementById('uploadIconBtn').style.display = canUpload ? 'flex' : 'none';
     document.getElementById('switchSiteBtn').style.display = canUpload ? 'inline-flex' : 'none';
 
+    document.getElementById('sidebarToggleBtn').style.display = canViewDashboard ? 'flex' : 'none';
     if (canViewDashboard) {
+        restoreSidebarState();
+        viewScope = 'team';
+        updateScopeBar();
         if (canUpload) await refreshRosterStatus();
         const rows = await loadAllAuditData();
         if (rows.length) {
@@ -260,6 +348,7 @@ async function renderMyTeamPanel(rows) {
             if (normalizeName(r['TEAM LEADER']) !== myKey) return;
             const name = String(r['AGENT/OFFICER NAME'] || '').trim();
             if (!name) return;
+            if (isTermedRow(r)) return; // resigned agent: name hidden from the list
             if (!byAgent[name]) byAgent[name] = { RELIABLE: [], PERSONABLE: [], FAST: [], 'SAFE & SECURE': [], 'OVERALL SCORE': [], count: 0 };
             byAgent[name].count++;
             ['RELIABLE', 'PERSONABLE', 'FAST', 'SAFE & SECURE', 'OVERALL SCORE'].forEach(k => {
@@ -433,6 +522,22 @@ function parseWorkbookFile(file, preferSheetNameContains) {
     });
 }
 
+/* Returns the rows of a sheet whose name contains one of the given keywords, or [] if none */
+function parseNamedSheet(file, keywords) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+                const name = wb.SheetNames.find(n => keywords.some(k => n.toUpperCase().includes(k)));
+                resolve(name ? XLSX.utils.sheet_to_json(wb.Sheets[name], { defval: '', raw: false }) : []);
+            } catch (err) { reject(err); }
+        };
+        reader.onerror = reject;
+        reader.readAsArrayBuffer(file);
+    });
+}
+
 function findHeader(row, candidates) {
     const keys = Object.keys(row);
     for (const cand of candidates) {
@@ -479,7 +584,8 @@ async function handleRosterUpload(event) {
                 agentName: String(r[nameKey] || '').trim(),
                 agentId: idKey ? normalizeEmployeeId(String(r[idKey] || '')) : '',
                 teamLeader: teamLeaderKey ? String(r[teamLeaderKey] || '').trim() : '',
-                position: positionKey ? String(r[positionKey] || '').trim() : ''
+                position: positionKey ? String(r[positionKey] || '').trim() : '',
+                status: 'active'
             }))
             .filter(r => r.email && r.agentName);
         const roster = allNamed.filter(r => r.email.endsWith('@supplier.smart.com.ph'));
@@ -487,11 +593,46 @@ async function handleRosterUpload(event) {
         const withTeamLeader = roster.filter(r => r.teamLeader).length;
         const missingWinId = roster.filter(r => !r.agentId).length;
 
-        await clearCollection('roster');
-        await batchWriteDocs('roster', roster, rosterDocId);
-        await resyncAgentEmails();
+        // Termed / resigned agents (separate sheet). They are stored with
+        // status:'termed' so the dashboard can hide them without losing their audits.
+        let termedList = [];
+        try {
+            const termedRows = await parseNamedSheet(file, ['TERMED', 'RESIGNED', 'SEPARATED']);
+            if (termedRows.length) {
+                const tName = findHeader(termedRows[0], ['Employee Name', 'Agent Name', 'Name']);
+                const tId = findHeader(termedRows[0], ['Win ID', 'Winid', 'WIN ID']);
+                const tSup = findHeader(termedRows[0], ['Supervisor Name', 'Team Leader']);
+                const tPos = findHeader(termedRows[0], ['Position']);
+                if (tName) {
+                    const activeKeys = new Set(roster.map(r => normalizeName(r.agentName)));
+                    const activeIds = new Set(roster.map(r => r.agentId).filter(Boolean));
+                    termedList = termedRows
+                        .map(r => ({
+                            email: '',
+                            agentName: String(r[tName] || '').trim(),
+                            agentId: tId ? normalizeEmployeeId(String(r[tId] || '')) : '',
+                            teamLeader: tSup ? String(r[tSup] || '').trim() : '',
+                            position: tPos ? String(r[tPos] || '').trim() : '',
+                            status: 'termed'
+                        }))
+                        .filter(r => r.agentName)
+                        // rehires: if they're back on the Active sheet, Active wins
+                        .filter(r => !activeKeys.has(normalizeName(r.agentName)) && !(r.agentId && activeIds.has(r.agentId)));
+                }
+            }
+        } catch (e) { console.warn('Termed sheet could not be read:', e); }
 
-        let rosterMsg = `✅ Roster loaded: ${roster.length} agents matched to emails. 🔄 Existing audit data auto-synced to match.`;
+        await clearCollection('roster');
+        await batchWriteDocs('roster', roster.concat(termedList), rosterDocId);
+        await resyncAgentEmails();
+        buildTermedSets(await getDocs(collection(db, 'roster')));
+        if (cachedAuditRows.length) { populateDropdownOptions(cachedAuditRows); filterData(); }
+
+        let rosterMsg = `✅ Roster loaded: ${roster.length} active agents matched to emails.`;
+        rosterMsg += termedList.length
+            ? ` 🚪 ${termedList.length} resigned agent(s) found on the Termed sheet — their names are hidden from My Team (their audits still count in scores).`
+            : ` ⚠️ No Termed sheet found — resigned agents' names will NOT be hidden.`;
+        rosterMsg += ` 🔄 Existing audit data auto-synced to match.`;
         rosterMsg += teamLeaderKey
             ? ` Team Leader column found ("${teamLeaderKey}") — ${withTeamLeader}/${roster.length} agents have a Team Leader assigned.`
             : ` ⚠️ No Team Leader column detected in this file (looked for "Supervisor Name", "Team Leader", or "TEAM LEADER") — Team Leader will show as Unassigned until this is fixed.`;
@@ -511,7 +652,8 @@ async function handleRosterUpload(event) {
 async function refreshRosterStatus() {
     const snap = await getDocs(collection(db, 'roster'));
     if (snap.size) {
-        document.getElementById('rosterStatus').innerHTML = `✅ Roster loaded: ${snap.size} agents.`;
+        const termedCount = snap.docs.filter(d => d.data().status === 'termed').length;
+        document.getElementById('rosterStatus').innerHTML = `✅ Roster loaded: ${snap.size - termedCount} active agents` + (termedCount ? `, ${termedCount} resigned (names hidden).` : '.');
     }
 }
 
@@ -800,7 +942,7 @@ function isHiddenLob(lobValue) {
 }
 
 function populateDropdownOptions(rows) {
-    rows = rows.filter(r => !isHiddenLob(r['BRAND']));
+    rows = applyVisibility(rows).filter(r => !isHiddenLob(r['BRAND']));
     const map = {
         selectFormType: 'FORM TYPE',
         selectBrand: 'BRAND',
@@ -848,6 +990,7 @@ async function loadAllAuditData() {
 
     try {
         const rosterSnap = await getDocs(collection(db, 'roster'));
+        buildTermedSets(rosterSnap);
         const nameToTeamLeader = {};
         rosterSnap.forEach(d => {
             const data = d.data();
@@ -886,8 +1029,8 @@ function resetFilters() {
 }
 
 function filterData() {
-    const rows = cachedAuditRows.filter(r => !isHiddenLob(r['BRAND']));
-    if (!rows.length) return;
+    if (!cachedAuditRows.length) return;
+    const rows = applyVisibility(cachedAuditRows).filter(r => !isHiddenLob(r['BRAND']));
 
     const f = {
         formType: document.getElementById('selectFormType').value,
@@ -1326,6 +1469,8 @@ window.toggleFiltersPanel = toggleFiltersPanel;
 window.handleRosterUpload = handleRosterUpload;
 window.handleDataUpload = handleDataUpload;
 window.resyncAgentEmails = resyncAgentEmails;
+window.setScope = setScope;
+window.toggleSidebar = toggleSidebar;
 window.floatCard = floatCard;
 window.dockCard = dockCard;
 
