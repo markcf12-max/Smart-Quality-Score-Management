@@ -234,9 +234,23 @@
                         <th>Safe &amp; Secure</th>
                         <th>Overall</th>
                         <th>Audits</th>
+                        <th title="Audits with an issue but no CO / Coaching Opportunity note">Needs Coaching</th>
                     </tr></thead>
                     <tbody id="myTeamTableBody"></tbody>
                 </table>
+            </div>
+
+            <div class="chart-box my-team-card" id="coachingCard" style="display:none; min-height:0;">
+                <div class="chart-title" id="coachingTitle">Coaching to Facilitate</div>
+                <div class="coach-note">These audits have an issue (score under 100% or a remark) but the remarks have no CO / Coaching Opportunity. Please facilitate the coaching.</div>
+                <div class="table-scroll-inner">
+                <table class="excel-table" id="coachingTable">
+                    <thead><tr>
+                        <th style="text-align:left;">Agent</th><th>Audit ID</th><th>Call / Case #</th><th>Weekending</th><th>Overall</th><th style="text-align:left;">Remarks flagged</th>
+                    </tr></thead>
+                    <tbody id="coachingTableBody"></tbody>
+                </table>
+                </div>
             </div>
         </div>
 
