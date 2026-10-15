@@ -812,3 +812,9 @@ footer.disclaimer {
     transition: border-color 0.15s, color 0.15s;
 }
 .card-table-placeholder:hover { border-color: var(--smart-green-mid); color: var(--smart-green-mid); }
+
+/* ============ COACHING FLAG ============ */
+.coach-badge { display:inline-block; min-width:22px; padding:2px 8px; border-radius:10px; background: var(--danger); color:#fff; font-weight:800; font-size:10px; }
+.coach-ok { color:#888; font-size:10px; }
+.coach-note { font-size:10.5px; color:#7a0f1e; background:#fbeceb; border:1px solid #f3c6c3; border-radius:4px; padding:6px 10px; margin-bottom:8px; }
+#coachingCard .table-scroll-inner { max-height: 360px; overflow-y: auto; }
