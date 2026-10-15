@@ -269,6 +269,8 @@ function resetToLoggedOutState() {
     if (sessionChip) sessionChip.style.display = 'none';
     if (switchSiteBtn) switchSiteBtn.style.display = 'none';
     if (myTeamCard) myTeamCard.style.display = 'none';
+    const coachingCardEl = document.getElementById('coachingCard');
+    if (coachingCardEl) coachingCardEl.style.display = 'none';
 
     const loginEmailEl = document.getElementById('loginEmail');
     const loginPasswordEl = document.getElementById('loginPassword');
@@ -327,10 +329,42 @@ async function enterApp() {
             await renderMyTeamPanel(rows);
         } else {
             document.getElementById('myTeamCard').style.display = 'none';
+            document.getElementById('coachingCard').style.display = 'none';
         }
     } else {
         await renderAgentView();
     }
+}
+
+/* ==========================================================================
+   COACHING FLAG (Team Leader access)
+   An audit is flagged "needs coaching" when it has something to coach on
+   (overall score under 100%, or a real remark in any of the 5 remark fields)
+   but NONE of those remarks carry a "CO" / "Coaching Opportunity" note.
+   -> the Team Leader has to facilitate the coaching themselves.
+   Audits that are clean ("No Opportunity" / NA everywhere, 100%) are never flagged.
+   ========================================================================== */
+const COACHING_REMARK_FIELDS = [
+    { col: 'RELIABLE: ADDITIONAL COMMENTS', label: 'Reliable' },
+    { col: 'PERSONABLE: ADDITIONAL COMMENTS', label: 'Personable' },
+    { col: 'FAST: ADDITIONAL COMMENTS', label: 'Fast' },
+    { col: 'OTHER FACTORS REMARKS', label: 'Other Factors' },
+    { col: 'WHAT MATTERS TO THE BUSINESS REMARKS', label: 'What Matters to the Business' }
+];
+const CO_REGEX = /\bCO\b|coaching\s*opp/i;
+
+function isMeaningfulRemark(v) {
+    const t = String(v == null ? '' : v).replace(/[\s.]/g, '').toUpperCase();
+    return !['', 'NA', 'N/A', 'NONE', 'NO', 'NOOPPORTUNITY'].includes(t);
+}
+
+function getCoachingFlag(row) {
+    const remarks = COACHING_REMARK_FIELDS.map(f => ({ label: f.label, text: String(row[f.col] == null ? '' : row[f.col]) }));
+    const hasCO = remarks.some(r => CO_REGEX.test(r.text));
+    const score = parseScore(row['OVERALL SCORE']);
+    const withRemark = remarks.filter(r => isMeaningfulRemark(r.text)).map(r => r.label);
+    const hasIssue = (score !== null && score < 99.995) || withRemark.length > 0;
+    return { needs: hasIssue && !hasCO, areas: withRemark, score };
 }
 
 async function renderMyTeamPanel(rows) {
@@ -344,13 +378,19 @@ async function renderMyTeamPanel(rows) {
         }
         const myKey = normalizeName(myName);
         const byAgent = {};
+        const coachList = [];
         rows.forEach(r => {
             if (normalizeName(r['TEAM LEADER']) !== myKey) return;
             const name = String(r['AGENT/OFFICER NAME'] || '').trim();
             if (!name) return;
             if (isTermedRow(r)) return; // resigned agent: name hidden from the list
-            if (!byAgent[name]) byAgent[name] = { RELIABLE: [], PERSONABLE: [], FAST: [], 'SAFE & SECURE': [], 'OVERALL SCORE': [], count: 0 };
+            if (!byAgent[name]) byAgent[name] = { RELIABLE: [], PERSONABLE: [], FAST: [], 'SAFE & SECURE': [], 'OVERALL SCORE': [], count: 0, coach: 0 };
             byAgent[name].count++;
+            const flag = getCoachingFlag(r);
+            if (flag.needs) {
+                byAgent[name].coach++;
+                coachList.push({ agent: name, id: r['ID'], callId: r['CALL ID / CASE NUMBER'], we: r['WEEKENDING'], month: r['MONTH'], score: flag.score, areas: flag.areas });
+            }
             ['RELIABLE', 'PERSONABLE', 'FAST', 'SAFE & SECURE', 'OVERALL SCORE'].forEach(k => {
                 const v = parseScore(r[k]);
                 if (v !== null) byAgent[name][k].push(v);
@@ -375,10 +415,30 @@ async function renderMyTeamPanel(rows) {
                     <td>${cell(avgOf(a['SAFE & SECURE']))}</td>
                     <td>${cell(avgOf(a['OVERALL SCORE']))}</td>
                     <td>${a.count}</td>
+                    <td>${a.coach ? `<span class="coach-badge">${a.coach}</span>` : '<span class="coach-ok">0</span>'}</td>
                 </tr>`;
             }).join('')
-            : `<tr><td colspan="7" class="empty-note">No audits found yet for agents under you.</td></tr>`;
+            : `<tr><td colspan="8" class="empty-note">No audits found yet for agents under you.</td></tr>`;
         card.style.display = 'block';
+
+        // Coaching-to-facilitate list
+        const coachCard = document.getElementById('coachingCard');
+        if (coachCard) {
+            coachList.sort((a, b) => a.agent.localeCompare(b.agent) || (Number(b.id) || 0) - (Number(a.id) || 0));
+            document.getElementById('coachingTitle').textContent =
+                `Coaching to Facilitate — ${coachList.length} audit${coachList.length === 1 ? '' : 's'} without a CO / Coaching Opportunity note`;
+            document.getElementById('coachingTableBody').innerHTML = coachList.length
+                ? coachList.map(c => `<tr>
+                    <td style="text-align:left;">${escapeHtml(c.agent)}</td>
+                    <td>${escapeHtml(c.id)}</td>
+                    <td>${escapeHtml(c.callId)}</td>
+                    <td>${escapeHtml(c.we)}</td>
+                    <td>${c.score === null ? '—' : Math.round(c.score) + '%'}</td>
+                    <td style="text-align:left;white-space:normal;">${c.areas.length ? c.areas.map(a => `<span class="tag Reliable">${escapeHtml(a)}</span>`).join('') : '<span class="coach-ok">Score below 100%</span>'}</td>
+                </tr>`).join('')
+                : `<tr><td colspan="6" class="empty-note">✅ Every audit with an issue already has a CO / Coaching Opportunity note.</td></tr>`;
+            coachCard.style.display = 'block';
+        }
     } catch (err) {
         console.error('My Team panel error:', err);
         card.style.display = 'none';
